@@ -260,7 +260,7 @@ Requires Node `^22.19.0 || >=24.0.0`. No install step, no dependencies.
 - All state lives in `DSH_HOME/our-free-model/`; usage stats and settings are written locally and uploaded nowhere.
 - The forward listener binds `127.0.0.1` by default and rejects requests without a key. Changing the bind host is an explicit action.
 - Forward keys are generated at runtime with `crypto`, compared with `timingSafeEqual`, and stored in a `0600` file. No credential is hardcoded in this repository.
-- The plugin registers its own HTTP routes under its namespace and authenticates them itself; it does not extend any shared settings surface.
+- The settings page talks to routes mounted on the app's own HTTP server under this plugin's namespace; they do not extend any shared settings surface. Stating the boundary honestly: **these routes have no authentication and no origin fence.** Measured on the running app, a loopback request with no token returns `200`, `Origin: http://example.com` passes through unchanged, and a bare `curl -X POST /forward/rotate` succeeds. So any local process can read and write them; a cross-origin web page cannot read the response (these routes send no CORS headers) but *can* fire a state-changing POST, which is a CSRF surface. The forward listener is a different story: it requires a key, generated with `crypto`, compared with `timingSafeEqual`, stored in a `0600` file, and unauthenticated requests to it get `401`. On a fresh install the key field is empty — one exists only after you click generate or rotate.
 - Uninstalling removes the bundle entry; the plugin leaves no patches behind. Its data directory is plain JSON you can delete.
 
 ## License

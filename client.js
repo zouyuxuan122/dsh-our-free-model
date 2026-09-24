@@ -810,16 +810,12 @@ window.__ModuleLoader__.load({
     function Announcement(props) {
       const { t, complete, openSection, page, setPage, summary, acknowledged } = props
       useEffect(() => { if (acknowledged) complete() }, [acknowledged, complete])
-      // Same contract as the onboarding modal of the shell: the app behind the
-      // dialog goes inert, and whatever had focus inside it returns there.
-      useEffect(() => {
-        if (acknowledged) return undefined
-        const root = document.getElementById('root')
-        if (root === null) return undefined
-        const previous = root.inert
-        root.inert = true
-        return () => { root.inert = previous }
-      }, [acknowledged])
+      /* Not `#root.inert`, even though the shell does that for its own onboarding
+         modals: those portal out of `#root`, while a slot-mounted step stays
+         inside it, and inert has no opt-out for descendants. Measured with it on,
+         `document.elementFromPoint` over the next-page button returned BODY — the
+         dialog could not be clicked at all. The full-viewport scrim already
+         swallows every pointer event aimed at the app behind it. */
       if (acknowledged) return null
       const last = page === PAGES.length - 1
       const finish = async () => {

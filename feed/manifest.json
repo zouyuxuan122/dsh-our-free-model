@@ -1,7 +1,7 @@
 {
   "version": "1.2.0",
   "base": "../",
-  "publishedAt": "2026-09-24T22:10:09.436Z",
+  "publishedAt": "2026-09-24T22:14:29.173Z",
   "notes": "",
   "files": [
     {
@@ -76,8 +76,8 @@
     },
     {
       "path": "src/feed.js",
-      "size": 10784,
-      "sha256": "aac1955ec6d2b663a4573c97a2ac2d21333295b58ae9200dfe1e1135f5718d71"
+      "size": 10843,
+      "sha256": "3f35e887e2b2a9f8b98e9f23be83f40d73dd5b61655b2a6eef8ef7c385be52db"
     },
     {
       "path": "src/forward.js",
@@ -126,8 +126,8 @@
     },
     {
       "path": "src/updater.js",
-      "size": 20386,
-      "sha256": "9549951474ea0a00e890562b9912d13a24a21b0fcf223aa1576b83f9fce2bd4e"
+      "size": 20445,
+      "sha256": "af1048ce6a1df936561238862d20940e76fc27424d2c1a2e775cb2bbdeec1aaa"
     },
     {
       "path": "src/upstream.js",

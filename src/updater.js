@@ -34,8 +34,8 @@ const REPO = 'zouyuxuan122/dsh-our-free-model'
  *  reachability reason as the feed (see src/feed.js): raw.githubusercontent.com
  *  is TLS-interfered on the networks this plugin most serves. */
 export const DEFAULT_MANIFEST_SOURCES = [
-  `https://cdn.jsdelivr.net/gh/${REPO}@main/feed/manifest.json`,
   `https://raw.githubusercontent.com/${REPO}/main/feed/manifest.json`,
+  `https://cdn.jsdelivr.net/gh/${REPO}@main/feed/manifest.json`,
   `https://raw.githubusercontent.com/${REPO}/master/feed/manifest.json`,
 ]
 
@@ -335,8 +335,8 @@ export class PluginUpdater {
    * @param {(message: string) => void} [deps.log]
    * @param {typeof fetch} [deps.fetchImpl]
    */
-  constructor({ pkgDir, dataDir, settings, log = () => {}, fetchImpl = fetch }) {
-    this.deps = { pkgDir, dataDir, settings, log, fetchImpl }
+  constructor({ pkgDir, dataDir, settings, log = () => {}, fetchImpl = fetch, defaultSources = DEFAULT_MANIFEST_SOURCES }) {
+    this.deps = { pkgDir, dataDir, settings, log, fetchImpl, defaultSources }
     this.latest = undefined
     this.checkedAt = 0
     this.error = ''
@@ -398,9 +398,9 @@ export class PluginUpdater {
         ? override.replace('{repo}', REPO)
         : override
       const manifestFromFeed = root.replace(/announcements\.json[^/]*$/, 'manifest.json')
-      return [manifestFromFeed, ...DEFAULT_MANIFEST_SOURCES]
+      return [manifestFromFeed, ...this.deps.defaultSources]
     }
-    return DEFAULT_MANIFEST_SOURCES
+    return this.deps.defaultSources
   }
 
   /**

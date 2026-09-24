@@ -16,6 +16,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import assert from 'node:assert/strict'
 import { parseVersion, compareVersions, parseManifest, fileUrlOf, PluginUpdater, stageRelease, verifyStaged, backupPackage, restoreBackup, installStaged, verifyInstalled } from '../src/updater.js'
+const CONTROLLED_DEFAULTS = ['http://127.0.0.1:1/never.json']
 
 let failures = 0
 const check = (name, fn) => {
@@ -136,7 +137,7 @@ await checkAsync('a hash mismatch aborts staging', async () => {
 await checkAsync('PluginUpdater.check detects the newer version', async () => {
   const pkg = makePackage(OLD)
   const data = makeDataDir()
-  const updater = new PluginUpdater({ pkgDir: pkg, dataDir: data, settings: () => ({ feedUrl: `${base}/repo/feed/announcements.json` }), fetchImpl: fetch })
+  const updater = new PluginUpdater({ pkgDir: pkg, dataDir: data, settings: () => ({ feedUrl: `${base}/repo/feed/announcements.json` }), fetchImpl: fetch, defaultSources: CONTROLLED_DEFAULTS })
   const status = await updater.check()
   assert.deepEqual(status, { available: true, current: OLD, latest: NEW })
   fs.rmSync(pkg, { recursive: true, force: true })
@@ -145,7 +146,7 @@ await checkAsync('PluginUpdater.check detects the newer version', async () => {
 await checkAsync('PluginUpdater rejects an unparsable manifest', async () => {
   const pkg = makePackage(OLD)
   const data = makeDataDir()
-  const updater = new PluginUpdater({ pkgDir: pkg, dataDir: data, settings: () => ({ feedUrl: `${badBase}/repo/feed/announcements.json` }), fetchImpl: fetch })
+  const updater = new PluginUpdater({ pkgDir: pkg, dataDir: data, settings: () => ({ feedUrl: `${badBase}/repo/feed/announcements.json` }), fetchImpl: fetch, defaultSources: CONTROLLED_DEFAULTS })
   await assert.rejects(() => updater.check())
   fs.rmSync(pkg, { recursive: true, force: true })
   fs.rmSync(data, { recursive: true, force: true })
@@ -153,7 +154,7 @@ await checkAsync('PluginUpdater rejects an unparsable manifest', async () => {
 await checkAsync('apply() upgrades the package in place and records history', async () => {
   const pkg = makePackage(OLD)
   const data = makeDataDir()
-  const updater = new PluginUpdater({ pkgDir: pkg, dataDir: data, settings: () => ({ feedUrl: `${base}/repo/feed/announcements.json` }), fetchImpl: fetch })
+  const updater = new PluginUpdater({ pkgDir: pkg, dataDir: data, settings: () => ({ feedUrl: `${base}/repo/feed/announcements.json` }), fetchImpl: fetch, defaultSources: CONTROLLED_DEFAULTS })
   const phases = []
   const result = await updater.apply({ onProgress: progress => { if (progress?.phase !== undefined) phases.push(progress.phase) } })
   assert.deepEqual(result, { version: NEW, previous: OLD, files: 4, bytes: Object.values(newFiles).reduce((sum, body) => sum + Buffer.byteLength(body), 0) })
@@ -176,7 +177,7 @@ await checkAsync('apply() drops files the new release removed', async () => {
   const pkg = makePackage(OLD)
   fs.writeFileSync(path.join(pkg, 'obsolete.js'), 'gone soon\n')
   const data = makeDataDir()
-  const updater = new PluginUpdater({ pkgDir: pkg, dataDir: data, settings: () => ({ feedUrl: `${base}/repo/feed/announcements.json` }), fetchImpl: fetch })
+  const updater = new PluginUpdater({ pkgDir: pkg, dataDir: data, settings: () => ({ feedUrl: `${base}/repo/feed/announcements.json` }), fetchImpl: fetch, defaultSources: CONTROLLED_DEFAULTS })
   await updater.apply({})
   assert.equal(fs.existsSync(path.join(pkg, 'obsolete.js')), false, 'a file absent from the manifest is removed')
   fs.rmSync(pkg, { recursive: true, force: true })
@@ -187,7 +188,7 @@ await checkAsync('a failed apply leaves the installed package and history consis
   const data = makeDataDir()
   // The corrupt server's bytes never hash-verify, so staging aborts before the
   // installed package is touched; the failure lands in the history log.
-  const updater = new PluginUpdater({ pkgDir: pkg, dataDir: data, settings: () => ({ feedUrl: `${corruptBase}/repo/feed/announcements.json` }), fetchImpl: fetch })
+  const updater = new PluginUpdater({ pkgDir: pkg, dataDir: data, settings: () => ({ feedUrl: `${corruptBase}/repo/feed/announcements.json` }), fetchImpl: fetch, defaultSources: CONTROLLED_DEFAULTS })
   await assert.rejects(() => updater.apply({}), /staging failed/)
   assert.equal(updater.currentVersion(), OLD)
   assert.equal(fs.readFileSync(path.join(pkg, 'index.js'), 'utf8'), oldFiles['index.js'])

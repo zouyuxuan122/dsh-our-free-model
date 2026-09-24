@@ -34,8 +34,8 @@ const REPO = 'zouyuxuan122/dsh-our-free-model'
  * the CDN (its default cache holds up to 12 hours).
  */
 export const DEFAULT_FEED_SOURCES = [
-  `https://cdn.jsdelivr.net/gh/${REPO}@main/feed/announcements.json`,
   `https://raw.githubusercontent.com/${REPO}/main/feed/announcements.json`,
+  `https://cdn.jsdelivr.net/gh/${REPO}@main/feed/announcements.json`,
   `https://raw.githubusercontent.com/${REPO}/master/feed/announcements.json`,
 ]
 
@@ -167,8 +167,8 @@ export class AnnouncementFeed {  /**
    * @param {(items: Array<object>) => void} [deps.onArrival] - items first seen in this poll
    * @param {(message: string) => void} [deps.log]
    */
-  constructor({ settings, cacheFile, onArrival, log = () => {} }) {
-    this.deps = { settings, cacheFile, onArrival, log }
+  constructor({ settings, cacheFile, onArrival, log = () => {}, defaultSources = DEFAULT_FEED_SOURCES }) {
+    this.deps = { settings, cacheFile, onArrival, log, defaultSources }
     this.cache = { at: 0, source: '', announcements: [] }
     this.error = ''
     this.polling = null
@@ -198,7 +198,7 @@ export class AnnouncementFeed {  /**
   /** Sources for this installation: the owner's override first, then the defaults. */
   sources() {
     const override = typeof this.deps.settings()?.feedUrl === 'string' ? this.deps.settings().feedUrl.trim() : ''
-    const defaults = DEFAULT_FEED_SOURCES
+    const defaults = this.deps.defaultSources
     if (override === '') return defaults
     return override.includes('{repo}')
       ? [override.replace('{repo}', REPO), ...defaults]

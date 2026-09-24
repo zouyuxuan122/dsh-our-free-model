@@ -15,6 +15,9 @@ import os from 'node:os'
 import path from 'node:path'
 import assert from 'node:assert/strict'
 import { parseFeed, fetchFeed, sortItems, AnnouncementFeed, DEFAULT_FEED_SOURCES } from '../src/feed.js'
+// Controlled stand-ins for the shipped defaults: the suite must never reach
+// the real GitHub sources (they answer 200 now that the repository is public).
+const CONTROLLED_DEFAULTS = ['http://127.0.0.1:1/never.json']
 
 let failures = 0
 const check = (name, fn) => {
@@ -101,6 +104,7 @@ await checkAsync('watcher: first poll on a fresh install stays silent', async ()
     settings: () => ({ feedUrl: `${base}/good.json` }),
     cacheFile: path.join(dir, 'feed.json'),
     onArrival: items => arrivals.push(...items),
+    defaultSources: CONTROLLED_DEFAULTS,
   })
   feedStore.load()
   assert.equal(feedStore.neverFetched, true)
@@ -116,6 +120,7 @@ await checkAsync('watcher: only genuinely new items arrive', async () => {
     settings: () => ({ feedUrl: `${base}/good.json` }),
     cacheFile: path.join(dir, 'feed.json'),
     onArrival: items => arrivals.push(...items),
+    defaultSources: CONTROLLED_DEFAULTS,
   })
   feedStore.load()
   await feedStore.poll()
@@ -135,6 +140,7 @@ await checkAsync('watcher: cache survives a failed poll', async () => {
     settings: () => ({ feedUrl: `${base}/good.json` }),
     cacheFile,
     onArrival: () => {},
+    defaultSources: CONTROLLED_DEFAULTS,
   })
   feedStore.load()
   await feedStore.poll()
@@ -151,7 +157,7 @@ await checkAsync('watcher: cache survives a failed poll', async () => {
 })
 await checkAsync('watcher: concurrent polls share one request', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ofm-feed-'))
-  const feedStore = new AnnouncementFeed({ settings: () => ({ feedUrl: `${base}/good.json` }), cacheFile: path.join(dir, 'f.json'), onArrival: () => {} })
+  const feedStore = new AnnouncementFeed({ settings: () => ({ feedUrl: `${base}/good.json` }), cacheFile: path.join(dir, 'f.json'), onArrival: () => {}, defaultSources: CONTROLLED_DEFAULTS })
   feedStore.load()
   const [a, b] = await Promise.all([feedStore.poll(), feedStore.poll()])
   assert.equal(a, b, 'same in-flight promise')

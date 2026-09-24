@@ -33,7 +33,10 @@
 
 - **Nothing to configure** — install, restart, pick a model. No account, no key, no quota dashboard to register on.
 - **A roster that tracks upstream** — model set, context length and capabilities are re-fetched on every refresh rather than frozen into the plugin.
-- **Honest capability claims** — anything a probe cannot confirm stays hidden. A model is never advertised as vision-capable because a table once said so.
+- **Every model stays reachable** — models a probe could not reach no longer vanish from the picker; only region-gated ones move to their own `region-limited` group.
+- **Announcement center with live push** — the repository owner edits one JSON file and pushes; every installation receives it within one poll cycle. Bodies are HTML rendered through a strict allowlist; `urgent` items open a full-screen modal; optional OS-level notifications.
+- **In-app upgrades** — one click in the settings page: download → SHA-256 verification → backup → atomic replace → read-back verification → hot reload, with automatic rollback if any step fails.
+- **Hot reload** — upgrades and code changes take effect immediately, no app restart; also available as a manual button and an optional file watcher.
 - **Region-aware, per egress** — models gated by geography are separated into their own `region-limited` group instead of failing mid-turn. Switch your network exit and the next probe reclassifies them automatically.
 - **Thinking effort that actually binds** — `Light / Balanced / Deep` map to output-token budgets of 2 048 / 8 192 / the model's full capacity, and are recorded per call. This is not a `reasoning_effort` string thrown at an endpoint that ignores it (see [Why a budget](#why-a-budget-and-not-reasoning_effort)).
 - **Usage dashboard, local only** — token heatmap, cumulative curve by total or per model, output speed and time-to-first-token sampled per call. Nothing is uploaded.
@@ -49,14 +52,16 @@
 | `Our Free Model` | Models usable from your current network exit |
 | `Our Free Model · region-limited` | Models the upstream refuses for this region, kept visible but separated |
 
-**Settings page — `Settings → Our Free Model`**, four sections:
+**Settings page — `Settings → Our Free Model`**, six sections:
 
 1. **Model roster** — per-model availability, vision vs text-only, context window, max output, measured time-to-first-token, and an on-demand single-call benchmark.
-2. **Usage board** — headline counters, a 17-week token heatmap, a cumulative curve switchable between tokens and request counts and between total and any single model, speed sparklines, and a per-model table.
-3. **Local forward** — enable/disable, bind host and port, copy base URL, show / copy / rotate the API key, and a ready-to-run `curl` example.
-4. **Plugin settings** — master switch, whether region-limited models are exposed, probe interval, default output ceiling, plus the detected egress IP and country.
+2. **Announcement center** — the owner-pushed feed: unread counter, urgency badges, mark-read (single/all), check-now button, OS-notification toggle. Bodies render HTML through the allowlist.
+3. **Usage board** — headline counters, a 17-week token heatmap, a cumulative curve switchable between tokens and request counts and between total and any single model, speed sparklines, and a per-model table.
+4. **Local forward** — enable/disable, bind host and port, copy base URL, show / copy / rotate the API key, and a ready-to-run `curl` example.
+5. **Plugin settings** — master switch, whether region-limited models are exposed, probe interval, default output ceiling, plus the detected egress IP and country.
+6. **Plugin upgrade** — installed/latest version, check for updates, one-click upgrade with progress and failure reasons, last-upgrade history, hot-reload button and file-watcher switch.
 
-**First-run announcement** — a four-page walkthrough (preamble, model roster, how to use, what it does) that acknowledges once and never reappears until the copy version is bumped.
+**First-run announcement** — a five-page walkthrough (preamble, model roster, how to use, what it does, news & upgrades) that acknowledges once and never reappears until the copy version is bumped.
 
 ## Install
 
@@ -86,7 +91,7 @@ To install manually as a real directory, in `<DSH_HOME>/profiles/<profile>/`:
 
 1. Copy the published files into `node_modules/dsh-our-free-model/`
    (`index.js`, `client.js`, `src/`, `locale/`, `icon.svg`, `cordis.patch.yml`, `package.json`)
-2. Add `"dsh-our-free-model": "1.0.0"` to `dependencies` — a version spec, not `link:`
+2. Add `"dsh-our-free-model": "1.1.2"` to `dependencies` — a version spec, not `link:`
 3. Append `"dsh-our-free-model"` to `dsh.profile.bundles`
 
 > Do **not** also add an entry to `cordis.patch.yml`. A bundle referenced from
@@ -139,11 +144,62 @@ POST /v1/responses
 your current exit. Toggling a VPN and re-probing moves region-gated models
 between the two groups on its own.
 
+**Receive announcements.** Everything is automatic: after the owner pushes, a
+running installation picks the item up within one poll cycle (30 minutes by
+default, or immediately via *Check for new announcements*). Regular items raise
+a toast, `urgent` items open a full-screen modal, and both land in the
+announcement center with an unread marker. Enable *OS notifications* there to
+also get system-level toasts.
+
+**Upgrade the plugin.** `Settings → Our Free Model → Plugin upgrade` →
+*Check for updates* → *Upgrade now*. The whole flow runs inside the app
+(download → verify → backup → replace → hot reload); no reinstall, no restart.
+A failed upgrade restores the previous version and reports why.
+
+## For the repository owner: pushing announcements and releases
+
+Everything lives in the repository's `feed/` directory — pushing is publishing:
+
+**Push an announcement** by editing [`feed/announcements.json`](feed/announcements.json):
+
+```json
+{
+  "id": "2026-10-01-something",        // unique; a seen id never re-alerts
+  "title": "One-line title",
+  "level": "info",                     // info | update | warn | urgent
+  "pinned": false,                     // optional
+  "createdAt": "2026-10-01T00:00:00Z",
+  "expiresAt": "2026-10-15T00:00:00Z", // optional
+  "link": { "url": "https://…", "label": "Read more" },
+  "html": "<p>Body with <strong>allowlisted HTML</strong></p>"
+}
+```
+
+`urgent` opens a full-screen modal. Bodies are rendered by a client-side
+allowlist parser — scripts, event handlers, `javascript:` URLs, iframes and
+friends are all dropped (see `scripts/sanitize-test.mjs`), so a compromised
+repository does not become code execution.
+
+**Release a new version**:
+
+```bash
+# 1. bump `version` in package.json
+# 2. regenerate the manifest (size + SHA-256 of every published file)
+node scripts/build-manifest.mjs
+# 3. commit and push
+```
+
+Installed plugins discover the new release automatically (every
+`updateCheckHours`, 6 by default) and notify the user; the upgrade itself runs
+in-app. The manifest re-verifies every file's SHA-256 and is re-fetched right
+before installing, so a stale manifest can never vouch for different bytes.
+
 ## How it works
 
 ```text
 index.js      host half: adapter registration, catalog + availability probes,
-              settings/stats stores, webServer API routes, forward lifecycle
+              settings/stats stores, webServer API routes, forward lifecycle,
+              announcement / upgrade / hot-reload wiring
 src/adapter.js  structural LlmAdapter: providerInfo, listModels, resolveModel,
                 prepareCall, stream, providerRetryPolicy
 src/upstream.js gateway identity: credentials, session/request id minting,
@@ -153,6 +209,15 @@ src/stream.js   three wire decoders (chat / messages / responses) normalised to
 src/messages.js harness messages -> wire shapes, plus tool-pairing repair
 src/effort.js   effort level -> output budget
 src/forward.js  standalone OpenAI-compatible listener
+src/trust.js    request trust fence for the plugin's routes (connection bridge
+                + structural fallback)
+src/push.js     SSE push hub: arrivals, update availability, upgrade done
+src/feed.js     remote announcement feed: multi-source fetch, validation, cache,
+                arrival detection
+src/updater.js  in-app upgrade: manifest validation, SHA-256 checks, backup,
+                atomic replace, rollback
+src/reload.js   self hot reload: mirrors the kernel HMR sequence (cache purge,
+                re-import, re-register, rollback)
 client.js       browser half: hand-written ModuleLoader bundle, no build step
 ```
 
@@ -205,25 +270,39 @@ output speed, and says so.
 
 ## Verification
 
-Tested on both kernels, on Windows, against the live upstream:
+Tested on both kernels, on Windows, against the live upstream. Every v1.1.2
+capability was **operated for real**, including click-through in a browser and
+inside the DSHEAC AIO desktop window:
 
 | Check | Result |
 | --- | --- |
 | `dsh` 0.1.7-rc.1 (source build) | Boots clean; picker shows both groups; multi-round tool calling completes |
-| DSHEAC AIO 6.9.3 (`dsh` 0.1.5-rc.2) | Profile gate `compatible` / `PASS`; app boots alongside 13 other third-party plugins |
-| Real conversation on 0.1.5-rc.2 | Turn completed; plugin's own ledger records `origin=harness`, `effort=deep`, 146 output tokens |
-| Effort propagation | Served calls carry the resolved level (`deep` and `balanced` recorded in the same session) |
+| `dsh` 0.1.5-rc.2 (DSHEAC AIO 6.9.3 kernel) | Boots clean alongside the other installed third-party plugins |
+| EAC startup gate | Run at install time **and after the in-app upgrade**: `compatible` / `PASS` |
+| Model reachability | All 10 catalog models stay invocable (including probe-failed/unavailable ones); real chat, multi-round tools and vision input pass on both kernels |
+| Real harness conversation | One real turn completed and answered in both dsh web and the AIO desktop window |
+| Announcement feed | New items pushed on a local "repository server" arrived within one poll cycle on both surfaces |
+| Announcement center UI | 4 items rendered (bold/code/links/lists), urgency badge, unread dots, mark-read single/all |
+| Urgent announcement | An `urgent` push opened the full-screen modal; acknowledging persisted |
+| Toast + OS notifications | Live toast on arrival; the desktop `window.Notification` channel exists (when the WebView2 permission policy denies the request, the UI says so) |
+| In-app upgrade | 1.1.0 → 1.1.2 completed on both dsh web and AIO: 23 files downloaded, SHA-256 verified, backed up, replaced, hot-reloaded; `/meta` reported the new version immediately |
+| Upgrade safety | A hash mismatch discards staging, leaves the installed package untouched and logs the failure; upgraded artifacts pass the EAC gate and a full restart |
+| Hot reload | Button and API entry points; ESM cache purge + re-register + rollback sequence; `generation` increments, client notices once via localStorage |
+| Client bundle hot swap | Replacing `client.js` reloaded the browser bundle automatically via the kernel's client-hmr (observed twice) |
+| Trust fence | Non-loopback Host / cross-site `sec-fetch-site` / foreign `Origin` all 403; cookieless loopback requests 401 (same as the kernel's `/api`) |
+| SSE push | `hello`/`announcements`/`update`/`upgraded` events verified; EventSource reconnects after a hot reload |
+| Effort propagation | light/balanced/deep measured live: reasoning 2048 (budget-truncated) / 3386 / 3522, output rising monotonically |
 | Region gating | Region-blocked model surfaces as `REGION_BLOCKED` and stays in its own group |
-| Vision input | Image block accepted, model describes it correctly |
 | Forward listener | `/v1/models`, streaming and non-streaming `/v1/chat/completions`, unauthenticated requests rejected `401` |
-| Announcement | Shows once, four pages, and does **not** reappear across a full app restart |
-| Speed measurement | Live probe recorded `output=802 / reasoning=675` with **zero** reasoning frames in a 189 ms window: raw division says 4 243 tok/s, the plugin reports nothing, while a streamed-reasoning call's 68 tok/s passes through unchanged |
 | UI strings | No mojibake; no upstream vendor name in any app-facing surface |
 
-Not verified, so stated plainly: **visual layout was not eyeballed in pixels.**
-The browser surface available during testing reported a zero-sized viewport, so
-screenshots were impossible. Layout was checked structurally — DOM content,
-computed CSS rules, theme-variable usage and a responsive grid — not visually.
+Not verified, so stated plainly: the **final OS-level notification rendering**
+was not visually confirmed — the AIO build's WebView2 permission policy denies
+`Notification.requestPermission()` (the plugin's Tauri notification channel is
+present, the plain-browser path works, and the settings page says plainly that
+permission was denied). The AIO guard also runs a report-only heuristic scan
+that logs one finding for the `env`-adjacent-URL pattern in `src/upstream.js`;
+it never touches files.
 
 ## Known limitations
 
@@ -233,11 +312,19 @@ computed CSS rules, theme-variable usage and a responsive grid — not visually.
 - **Capabilities are what probes can confirm.** Anything the public listing and a live probe do not evidence is left unlabelled.
 - **Source is plain JavaScript.** It has to be, to load as a local plugin. Anyone with the folder can read the gateway logic; treat that as an accepted property of this distribution form, not as something obfuscation would fix.
 - **Desktop installs need a real directory**, for the reason given in [Install](#install).
+- **Upgrade and hot-reload trust boundary**: the in-app upgrader trusts the plugin repository itself — whoever can push the repository can push code. That is the same trust model as installing a plugin update. File integrity is enforced by the SHA-256 manifest; content safety by the client-side allowlist renderer and the host's plugin isolation.
+- **The AIO build's WebView2 permission policy may deny notification permission** (measured `denied` on this machine). The announcement center says so plainly; plain-browser access to dsh web is unaffected.
+- **The plugin routes' auth depends on the composition**: with a connection service mounted (dsh web, the AIO desktop) it matches the kernel's `/api` (the app's own cookie/token); in minimal compositions without one, a structural fence applies (loopback + same-origin), and other local processes can still reach the routes — the same behaviour the kernel has in those compositions.
 
 ## Development
 
 ```bash
 node scripts/client-lint.mjs        # browser half: copy/style key coverage, bundle executes
+node scripts/sanitize-test.mjs      # announcement HTML allowlist renderer vs an XSS corpus
+node scripts/trust-test.mjs         # request trust fence for the plugin's routes
+node scripts/feed-test.mjs          # announcement feed: parsing, failover, cache, arrivals
+node scripts/updater-test.mjs       # in-app upgrade: manifests, SHA-256, backup/rollback
+node scripts/build-manifest.mjs     # release: regenerate feed/manifest.json
 node scripts/retry-safety-test.mjs  # failures and retry policy are durable-log safe
 node scripts/speed-stat-test.mjs    # no call can average its way into a fake tok/s
 node scripts/host-selftest.mjs      # host half end to end against the live upstream
@@ -257,10 +344,12 @@ Requires Node `^22.19.0 || >=24.0.0`. No install step, no dependencies.
 
 ## Security and privacy
 
-- All state lives in `DSH_HOME/our-free-model/`; usage stats and settings are written locally and uploaded nowhere.
-- The forward listener binds `127.0.0.1` by default and rejects requests without a key. Changing the bind host is an explicit action.
-- Forward keys are generated at runtime with `crypto`, compared with `timingSafeEqual`, and stored in a `0600` file. No credential is hardcoded in this repository.
-- The settings page talks to routes mounted on the app's own HTTP server under this plugin's namespace; they do not extend any shared settings surface. Stating the boundary honestly: **these routes have no authentication and no origin fence.** Measured on the running app, a loopback request with no token returns `200`, `Origin: http://example.com` passes through unchanged, and a bare `curl -X POST /forward/rotate` succeeds. So any local process can read and write them; a cross-origin web page cannot read the response (these routes send no CORS headers) but *can* fire a state-changing POST, which is a CSRF surface. The forward listener is a different story: it requires a key, generated with `crypto`, compared with `timingSafeEqual`, stored in a `0600` file, and unauthenticated requests to it get `401`. On a fresh install the key field is empty — one exists only after you click generate or rotate.
+- All state lives in `DSH_HOME/our-free-model/`; usage and settings stay local, nothing is uploaded.
+- The forward listener binds `127.0.0.1` by default and rejects keyless requests. Changing the bind address is an explicit action.
+- The forward key is generated by `crypto` at runtime, compared with `timingSafeEqual`, and stored in a `0600` file. This repository contains no hard-coded credentials.
+- The plugin's HTTP routes carry a **request trust fence** (fixed in v1.1): the plugin's `/api/our-free-model` prefix outranks the kernel's `/api` in webServer's longest-prefix dispatch and used to bypass kernel auth. Every request now goes through the composition's `connection` admission first (exactly the kernel's `/api` check: cookie/token); compositions without a connection service fall back to a structural fence — loopback Host, cross-site `sec-fetch-site` refused, `Origin`/`Referer` must match the Host authority and port. Measured: foreign Host/Origin 403, cookieless loopback 401.
+- **Announcement HTML renders through a strict client-side allowlist**: `scripts/sanitize-test.mjs` runs an XSS corpus (script injection, event handlers, `javascript:`/`data:` URLs, iframe/svg/form, style injection, mangled tags) and asserts all of it is dropped; nothing ever reaches an `innerHTML` sink. The feed URL is user-overridable, so the renderer treats feed content as untrusted.
+- **The in-app upgrade integrity chain**: manifest validation (semver, path traversal, hash shape) → per-file SHA-256 + byte size on download → read-back verification of staging → read-back verification after install → backup restore on any failure. The manifest is re-fetched immediately before installing so a stale one can never vouch for different bytes. The upgrade's trust root is the plugin repository itself (same as installing an update); boundaries in [Known limitations](#known-limitations).
 - Uninstalling removes the bundle entry; the plugin leaves no patches behind. Its data directory is plain JSON you can delete.
 
 ## License

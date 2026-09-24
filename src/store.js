@@ -42,6 +42,7 @@ export class JsonStore {
     this.value = initial
     this.dirty = false
     this.timer = undefined
+    this.disposed = false
     this.load()
   }
 
@@ -63,6 +64,7 @@ export class JsonStore {
 
   /** Merge a patch in and schedule the write. Returns the new value. */
   update(patch) {
+    if (this.disposed) return this.value
     this.value = { ...this.value, ...patch }
     this.schedule()
     return this.value
@@ -70,6 +72,7 @@ export class JsonStore {
 
   /** Mutate through a callback; used for read-modify-write on nested state. */
   edit(mutate) {
+    if (this.disposed) return this.value
     const next = mutate(structuredClone(this.value))
     if (next !== undefined) this.value = next
     this.schedule()
@@ -77,6 +80,7 @@ export class JsonStore {
   }
 
   schedule(delayMs = 800) {
+    if (this.disposed) return
     this.dirty = true
     if (this.timer !== undefined) return
     this.timer = setTimeout(() => {
@@ -88,7 +92,7 @@ export class JsonStore {
   }
 
   flush() {
-    if (!this.dirty) return
+    if (!this.dirty || this.disposed) return
     this.dirty = false
     try {
       fs.mkdirSync(path.dirname(this.file), { recursive: true })
@@ -102,7 +106,14 @@ export class JsonStore {
 
   dispose() {
     if (this.timer !== undefined) { clearTimeout(this.timer); this.timer = undefined }
+    // Persist what this generation changed, THEN lock the store: late callbacks
+    // from a hot-reloaded-away generation (an in-flight feed poll, a pending
+    // update check) must never write over the successor generation's state.
+    // The disposal order makes this safe — the successor's stores are created
+    // only after the previous generation's disposers have run.
     this.flush()
+    this.disposed = true
+    this.dirty = false
   }
 }
 
@@ -133,6 +144,27 @@ export const SETTINGS_INITIAL = {
   catalogSyncedAt: 0,
   /** Router-project overlay refresh timestamp. */
   routerSyncedAt: 0,
+  /** Owner override for the announcement/update feed location. `{repo}` expands
+   *  to the plugin repository slug; empty means the shipped GitHub sources. */
+  feedUrl: '',
+  /** Minutes between announcement-feed polls; floored at 5. */
+  feedPollMinutes: 30,
+  /** Raise OS-level notifications for new announcements and updates (the
+   *  browser asks for permission on the user's click). */
+  notifyOs: false,
+  /** Announcement ids the user has acknowledged. */
+  announcementsAcked: [],
+  /** Hours between automatic update checks; 0 disables them entirely. */
+  updateCheckHours: 6,
+  /** Version whose update availability has already been pushed. */
+  updateNotifiedFor: '',
+  /** Watch the installed package and hot-reload on change (development aid). */
+  autoReloadWatch: false,
+  /** When the running code was hot-reloaded into place, and how many times. */
+  reloadedAt: 0,
+  reloadCount: 0,
+  /** Version installed by the in-app upgrader, for the settings page. */
+  installedVersion: '',
 }
 
 export const STATS_INITIAL = { version: STATS_VERSION, days: {}, models: {}, requests: 0, samples: [] }

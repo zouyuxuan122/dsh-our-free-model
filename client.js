@@ -131,6 +131,64 @@ window.__ModuleLoader__.load({
         'ann.f3': '输出速度（tok/s）与首字延迟（TTFT）逐次采样。',
         'ann.f4': 'OpenAI 兼容转发端口 + 可生成的 API Key。',
         'ann.f5': '全部数据留在本机，不上传任何遥测。',
+        'ann.updates': '公告与升级',
+        'ann.u1': '公告中心：仓库主人推送的新公告会实时到达，支持图文排版（HTML）。',
+        'ann.u2': '系统通知：开启后，新公告与插件更新会弹出系统级通知。',
+        'ann.u3': '应用内升级：新版本发布后可直接在设置页升级，无需重新安装。',
+        'ann.u4': '热重载：升级与本插件的代码更新即时生效，不需要重启应用。',
+        'section.news': '公告中心',
+        'section.newsHint': '公告由仓库主人推送，本页实时接收。',
+        'section.upgrade': '插件升级',
+        'section.upgradeHint': '在应用内直接升级插件，无需重新安装或重启。',
+        'news.unread': '{n} 条未读',
+        'news.allRead': '全部已读',
+        'news.markRead': '标记已读',
+        'news.refresh': '检查新公告',
+        'news.refreshing': '检查中…',
+        'news.empty': '暂无公告。仓库主人推送的新公告会出现在这里。',
+        'news.emptyHint': '公告内容支持图文排版，由仓库主人在插件仓库中编辑发布。',
+        'news.osEnable': '开启系统通知',
+        'news.osOn': '系统通知已开启',
+        'news.osOff': '系统通知未开启',
+        'news.osDenied': '浏览器拒绝了通知权限；需要在系统/浏览器设置里手动恢复。',
+        'news.link': '查看详情',
+        'news.urgentTitle': '重要公告',
+        'news.gotIt': '知道了',
+        'news.lastFetch': '最近拉取',
+        'news.fetchFailed': '公告源暂不可达（显示的是缓存）',
+        'level.info': '通知',
+        'level.update': '更新',
+        'level.warn': '注意',
+        'level.urgent': '紧急',
+        'upgrade.current': '当前版本',
+        'upgrade.latest': '最新版本',
+        'upgrade.checkedAt': '上次检查',
+        'upgrade.never': '从未检查',
+        'upgrade.check': '检查更新',
+        'upgrade.checking': '检查中…',
+        'upgrade.upToDate': '已是最新版本',
+        'upgrade.available': '可升级到 {version}',
+        'upgrade.apply': '立即升级',
+        'upgrade.applying': '升级中…',
+        'upgrade.phase.download': '正在下载新版本…',
+        'upgrade.phase.install': '正在安装文件…',
+        'upgrade.phase.reload': '正在热重载…',
+        'upgrade.done': '已升级到 {version}，插件已热重载生效。',
+        'upgrade.doneRefresh': '已升级到 {version}。点击刷新页面加载新界面。',
+        'upgrade.failed': '升级失败：{message}',
+        'upgrade.history': '最近一次升级',
+        'upgrade.from': '由 {from} 升级',
+        'upgrade.notes': '更新说明',
+        'upgrade.auto': '自动检查：每 {n} 小时',
+        'upgrade.autoOff': '自动检查已关闭',
+        'reload.now': '热重载插件',
+        'reload.reloading': '重载中…',
+        'reload.done': '插件已热重载（第 {n} 次）。',
+        'reload.refresh': '刷新页面',
+        'reload.auto': '文件变化自动热重载',
+        'toast.annTitle': '新公告',
+        'toast.updateTitle': '插件可升级',
+        'toast.updateBody': '发现新版本 {latest}（当前 {current}），可到设置页升级。',
       },
       en: {
         'meta.title': 'Our Free Model',
@@ -232,6 +290,64 @@ window.__ModuleLoader__.load({
         'ann.f3': 'Per-call samples of output speed (tok/s) and time to first token.',
         'ann.f4': 'OpenAI-compatible forward port with a generated API key.',
         'ann.f5': 'Everything stays on this machine — no telemetry.',
+        'ann.updates': 'News & upgrades',
+        'ann.u1': 'Announcement center: pushes from the repository owner arrive live, with rich (HTML) layout.',
+        'ann.u2': 'OS notifications: once enabled, new announcements and plugin updates raise system-level toasts.',
+        'ann.u3': 'In-app upgrades: install new releases straight from the settings page, no reinstall needed.',
+        'ann.u4': 'Hot reload: upgrades and code changes take effect immediately, without restarting the app.',
+        'section.news': 'Announcement center',
+        'section.newsHint': 'Published by the repository owner; this page receives them live.',
+        'section.upgrade': 'Plugin upgrade',
+        'section.upgradeHint': 'Upgrade in-app — no reinstall, no restart.',
+        'news.unread': '{n} unread',
+        'news.allRead': 'Mark all read',
+        'news.markRead': 'Mark read',
+        'news.refresh': 'Check for new announcements',
+        'news.refreshing': 'Checking…',
+        'news.empty': 'No announcements yet. Anything the owner pushes will appear here.',
+        'news.emptyHint': 'Announcements support rich layout and are published by editing the plugin repository.',
+        'news.osEnable': 'Enable OS notifications',
+        'news.osOn': 'OS notifications on',
+        'news.osOff': 'OS notifications off',
+        'news.osDenied': 'Notification permission was denied; restore it in your system or browser settings.',
+        'news.link': 'Read more',
+        'news.urgentTitle': 'Important announcement',
+        'news.gotIt': 'Got it',
+        'news.lastFetch': 'Last fetch',
+        'news.fetchFailed': 'Feed unreachable right now (showing the cached copy)',
+        'level.info': 'Notice',
+        'level.update': 'Update',
+        'level.warn': 'Heads-up',
+        'level.urgent': 'Urgent',
+        'upgrade.current': 'Installed',
+        'upgrade.latest': 'Latest',
+        'upgrade.checkedAt': 'Last check',
+        'upgrade.never': 'never',
+        'upgrade.check': 'Check for updates',
+        'upgrade.checking': 'Checking…',
+        'upgrade.upToDate': 'Up to date',
+        'upgrade.available': 'Upgrade to {version} available',
+        'upgrade.apply': 'Upgrade now',
+        'upgrade.applying': 'Upgrading…',
+        'upgrade.phase.download': 'Downloading the new version…',
+        'upgrade.phase.install': 'Installing files…',
+        'upgrade.phase.reload': 'Hot-reloading…',
+        'upgrade.done': 'Upgraded to {version}; the plugin hot-reloaded into place.',
+        'upgrade.doneRefresh': 'Upgraded to {version}. Reload the page to load the new UI.',
+        'upgrade.failed': 'Upgrade failed: {message}',
+        'upgrade.history': 'Last upgrade',
+        'upgrade.from': 'from {from}',
+        'upgrade.notes': 'Release notes',
+        'upgrade.auto': 'Auto-check: every {n} h',
+        'upgrade.autoOff': 'Auto-check off',
+        'reload.now': 'Hot-reload plugin',
+        'reload.reloading': 'Reloading…',
+        'reload.done': 'Plugin hot-reloaded (#{n}).',
+        'reload.refresh': 'Reload page',
+        'reload.auto': 'Hot-reload on file change',
+        'toast.annTitle': 'New announcement',
+        'toast.updateTitle': 'Plugin update available',
+        'toast.updateBody': 'Version {latest} is out (installed {current}). Upgrade from the settings page.',
       },
     }
 
@@ -344,6 +460,59 @@ window.__ModuleLoader__.load({
 .ofm_kvc b{font-size:12.5px}
 .ofm_kvc span{font-size:10.5px;color:var(--dsw-alias-label-tertiary)}
 .ofm_two{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px}
+/* announcement center + upgrade */
+.ofm_news{display:flex;flex-direction:column;gap:10px}
+.ofm_newsitem{display:flex;flex-direction:column;gap:7px;padding:12px 14px;border-radius:12px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);position:relative}
+.ofm_newsitem.unread{border-color:var(--dsw-alias-state-business-primary)}
+.ofm_newsdot{position:absolute;top:14px;right:14px;width:8px;height:8px;border-radius:50%;background:var(--dsw-alias-state-business-primary)}
+.ofm_newshead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-right:16px}
+.ofm_newstitle{font-size:13px;font-weight:650}
+.ofm_level{font-size:10.5px;padding:2px 8px;border-radius:999px;border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-secondary);white-space:nowrap}
+.ofm_level.info{color:var(--dsw-alias-state-business-primary);border-color:var(--dsw-alias-state-business-primary)}
+.ofm_level.update{color:var(--dsw-alias-state-success-primary);border-color:var(--dsw-alias-state-success-primary)}
+.ofm_level.warn{color:var(--dsw-alias-state-warning-primary);border-color:var(--dsw-alias-state-warning-primary)}
+.ofm_level.urgent{color:#fff;background:var(--dsw-alias-state-error-primary);border-color:var(--dsw-alias-state-error-primary)}
+.ofm_newsmeta{display:flex;gap:10px;font-size:11px;color:var(--dsw-alias-label-tertiary);flex-wrap:wrap}
+.ofm_newsbody{font-size:12.5px;line-height:1.7;color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere}
+.ofm_newsbody p{margin:0 0 6px}
+.ofm_newsbody p:last-child{margin-bottom:0}
+.ofm_newsbody h1,.ofm_newsbody h2,.ofm_newsbody h3,.ofm_newsbody h4{margin:6px 0 4px;font-size:13px;line-height:1.4}
+.ofm_newsbody ul,.ofm_newsbody ol{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:3px}
+.ofm_newsbody code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:5px;padding:1px 5px}
+.ofm_newsbody pre{margin:4px 0;padding:8px 10px;border-radius:9px;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);overflow-x:auto}
+.ofm_newsbody pre code{background:transparent;border:0;padding:0}
+.ofm_newsbody blockquote{margin:4px 0;padding:2px 10px;border-left:3px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-tertiary)}
+.ofm_newsbody img{max-width:100%;border-radius:8px}
+.ofm_newsbody a{color:var(--dsw-alias-state-business-primary);text-decoration:none}
+.ofm_newsbody a:hover{text-decoration:underline}
+.ofm_newsbody table{border-collapse:collapse;font-size:12px}
+.ofm_newsbody th,.ofm_newsbody td{border:1px solid var(--dsw-alias-border-l1);padding:3px 8px}
+.ofm_newsbody hr{border:0;border-top:1px solid var(--dsw-alias-border-l1);margin:8px 0}
+.ofm_newsbody mark{background:color-mix(in srgb,var(--dsw-alias-state-warning-primary) 30%,transparent)}
+.ofm_upgradecards{display:flex;gap:8px;flex-wrap:wrap}
+.ofm_upnotes{max-height:220px;overflow:auto;padding:10px 12px;border-radius:10px;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1)}
+.ofm_prog{height:4px;border-radius:99px;background:var(--dsw-alias-bg-layer-1);overflow:hidden}
+.ofm_prog i{display:block;height:100%;width:40%;border-radius:99px;background:var(--dsw-alias-state-business-primary);animation:ofm-prog-slide 1.1s ease-in-out infinite}
+@keyframes ofm-prog-slide{0%{transform:translateX(-100%)}100%{transform:translateX(260%)}}
+/* toasts (vanilla DOM, appended to body so they float above every surface) */
+.ofm_toasts{position:fixed;right:18px;bottom:18px;z-index:1200;display:flex;flex-direction:column;gap:10px;max-width:min(380px,calc(100vw - 36px));font-family:inherit}
+.ofm_toast{display:flex;flex-direction:column;gap:6px;padding:12px 14px;border-radius:12px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);box-shadow:0 10px 34px rgb(0 0 0 / 22%);font-size:12.5px;line-height:1.5;color:var(--dsw-alias-label-primary);animation:ofm-toast-rise .18s ease}
+.ofm_toast.warn{border-color:var(--dsw-alias-state-warning-primary)}
+.ofm_toast.urgent{border-color:var(--dsw-alias-state-error-primary)}
+.ofm_toast .ofm_toasttitle{font-weight:650;font-size:12.5px;display:flex;align-items:center;gap:7px}
+.ofm_toast .ofm_toastbody{color:var(--dsw-alias-label-secondary);max-height:180px;overflow:auto;overflow-wrap:anywhere}
+.ofm_toast .ofm_toastbody p{margin:0 0 5px}
+.ofm_toast .ofm_toastbody p:last-child{margin-bottom:0}
+.ofm_toast .ofm_toastbody img{max-width:100%}
+.ofm_toastactions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.ofm_toastclose{margin-left:auto;background:transparent;border:0;color:var(--dsw-alias-label-tertiary);cursor:pointer;font:inherit;font-size:13px;padding:0 2px}
+.ofm_toastclose:hover{color:var(--dsw-alias-label-primary)}
+@keyframes ofm-toast-rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.ofm_modal{width:min(520px,92vw);max-height:min(80vh,600px);border-radius:16px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);box-shadow:0 24px 70px rgb(0 0 0 / 34%);display:flex;flex-direction:column;overflow:hidden}
+.ofm_modalhead{padding:16px 20px 10px;display:flex;align-items:center;gap:10px;font-size:15px;font-weight:700}
+.ofm_modalbody{padding:4px 20px 16px;overflow:auto;font-size:12.5px;line-height:1.7;color:var(--dsw-alias-label-secondary)}
+.ofm_modalbody p{margin:0 0 6px}
+.ofm_modalfoot{display:flex;justify-content:flex-end;gap:8px;padding:12px 20px;border-top:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1)}
 @media (max-width:720px){.ofm_sec_hint{margin-left:0;width:100%}.ofm_pills{margin-left:0;width:100%}}
 `
 
@@ -418,6 +587,281 @@ window.__ModuleLoader__.load({
         document.body.removeChild(area)
         return ok
       } catch { return false }
+    }
+
+    // ── announcement HTML: strict allowlist, no innerHTML sink ───────────────
+    // The feed is authored by the repository owner, but rendering is a trust
+    // boundary of its own: the feed URL can be pointed anywhere, and a
+    // compromised repository must never become script execution. Nothing here
+    // hands a string to the HTML engine — the tokenizer walks the text, drops
+    // everything off the allowlist, and builds a virtual tree that both React
+    // and plain DOM can materialize. The same parser is exercised headlessly
+    // by scripts/sanitize-test.mjs.
+    const ALLOWED_TAGS = new Set(['a', 'abbr', 'b', 'blockquote', 'br', 'caption', 'code', 'dd', 'del', 'details', 'div', 'dl', 'dt', 'em', 'figcaption', 'figure', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'i', 'img', 'ins', 'kbd', 'li', 'mark', 'ol', 'p', 'pre', 'q', 's', 'small', 'span', 'strong', 'sub', 'summary', 'sup', 'table', 'tbody', 'td', 'tfoot', 'th', 'thead', 'tr', 'u', 'ul'])
+    /** Everything these elements contain is dropped, closing tag included. */
+    const DROP_CONTENT_TAGS = new Set(['script', 'style', 'iframe', 'object', 'embed', 'noscript', 'template', 'textarea', 'title', 'svg', 'math', 'form', 'input', 'button', 'select', 'option', 'video', 'audio', 'canvas', 'link', 'meta', 'base'])
+    const VOID_TAGS = new Set(['br', 'hr', 'img'])
+    const MAX_HTML_NODES = 4000
+    const ALLOWED_STYLE_PROPS = new Set(['color', 'background-color', 'text-align', 'font-weight', 'font-style', 'text-decoration'])
+    const STYLE_CAMEL = { 'background-color': 'backgroundColor', 'text-align': 'textAlign', 'font-weight': 'fontWeight', 'font-style': 'fontStyle', 'text-decoration': 'textDecoration', color: 'color' }
+
+    /** http(s), mailto and in-page fragments only; images additionally accept inline PNG/JPEG/GIF/WebP. */
+    function safeUrl(raw, isImage) {
+      const value = String(raw ?? '').trim()
+      if (value === '' || value.length > 2000) return undefined
+      const lower = value.toLowerCase()
+      if (/^https?:\/\//.test(lower)) return value
+      if (lower.startsWith('mailto:') && /^[^@\s]+@[^@\s]+$/.test(value.slice(7))) return value
+      if (lower.startsWith('#')) return value
+      if (isImage && /^data:image\/(png|jpe?g|gif|webp);base64,[a-z0-9+/=]+$/i.test(value)) return value
+      return undefined
+    }
+
+    function sanitizeStyle(raw) {
+      const out = {}
+      for (const decl of String(raw ?? '').split(';')) {
+        const idx = decl.indexOf(':')
+        if (idx === -1) continue
+        const prop = decl.slice(0, idx).trim().toLowerCase()
+        const value = decl.slice(idx + 1).trim()
+        if (!ALLOWED_STYLE_PROPS.has(prop) || value === '' || value.length > 120) continue
+        if (/url\(|expression|javascript:|@|<|>/.test(value.toLowerCase())) continue
+        out[STYLE_CAMEL[prop]] = value
+      }
+      return out
+    }
+
+    function sanitizeAttrs(tag, attrText) {
+      const props = {}
+      const attrRe = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)(?:\s*=\s*("([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g
+      let match
+      while ((match = attrRe.exec(attrText ?? '')) !== null) {
+        const key = match[1].toLowerCase()
+        const value = match[3] ?? match[4] ?? match[5] ?? ''
+        if (key === 'style') {
+          const style = sanitizeStyle(value)
+          if (Object.keys(style).length > 0) props.style = style
+          continue
+        }
+        if (tag === 'a' && key === 'href') {
+          const url = safeUrl(value)
+          if (url !== undefined) {
+            props.href = url
+            props.target = '_blank'
+            props.rel = 'noopener noreferrer'
+          }
+          continue
+        }
+        if (tag === 'img' && key === 'src') {
+          const url = safeUrl(value, true)
+          if (url !== undefined) props.src = url
+          continue
+        }
+        if ((tag === 'img' || tag === 'a') && key === 'title') { props.title = value.slice(0, 300); continue }
+        if (tag === 'img' && key === 'alt') { props.alt = value.slice(0, 300); continue }
+        if ((key === 'width' || key === 'height') && /^\d{1,4}$/.test(value)) { props[key] = Number(value); continue }
+      }
+      return props
+    }
+
+    /**
+     * Tokenize announcement HTML into a virtual tree of
+     * `{type:'el', tag, props, children}` and `{type:'text', text}` nodes.
+     * Disallowed elements are unwrapped (their children survive); the content
+     * of raw-text elements such as `<script>` is dropped entirely.
+     */
+    function parseSafeHtml(html) {
+      if (typeof html !== 'string' || html.trim() === '') return []
+      const root = { type: 'root', children: [] }
+      const stack = [root]
+      const top = () => stack[stack.length - 1]
+      let nodes = 0
+      let skipUntil = null
+      const tokenRe = /<!--[\s\S]*?-->|<\/\s*([a-zA-Z][a-zA-Z0-9-]*)\s*>|<\s*([a-zA-Z][a-zA-Z0-9-]*)((?:"[^"]*"|'[^']*'|[^>"'])*)>|([^<]+)/g
+      let match
+      while ((match = tokenRe.exec(html)) !== null) {
+        if (nodes >= MAX_HTML_NODES) break
+        if (match[0].startsWith('<!--')) continue
+        if (match[4] !== undefined) {
+          if (skipUntil === null) {
+            const text = match[4]
+            if (text.trim() !== '' || (top().children.length > 0 && typeof top().children[top().children.length - 1] !== 'string')) {
+              top().children.push(text)
+            }
+          }
+          continue
+        }
+        const name = (match[1] ?? match[2] ?? '').toLowerCase()
+        if (name === '') continue
+        if (match[1] !== undefined) {
+          // closing tag
+          if (skipUntil !== null) {
+            if (name === skipUntil) skipUntil = null
+            continue
+          }
+          if (!ALLOWED_TAGS.has(name)) continue
+          let depth = stack.length - 1
+          while (depth > 0 && stack[depth].tag !== name) depth -= 1
+          if (depth === 0) continue
+          while (stack.length - 1 > depth) {
+            const dropped = stack.pop()
+            top().children.push(...dropped.children)
+          }
+          const frame = stack.pop()
+          top().children.push({ type: 'el', tag: frame.tag, props: frame.props, children: frame.children })
+          nodes += 1
+          continue
+        }
+        // opening tag
+        if (skipUntil !== null) continue
+        if (DROP_CONTENT_TAGS.has(name)) { skipUntil = name; continue }
+        if (!ALLOWED_TAGS.has(name)) continue
+        const props = sanitizeAttrs(name, match[3])
+        if (name === 'img' && props.src === undefined) continue
+        if (VOID_TAGS.has(name)) {
+          top().children.push({ type: 'el', tag: name, props, children: [] })
+          nodes += 1
+          continue
+        }
+        stack.push({ tag: name, props, children: [] })
+      }
+      while (stack.length > 1) {
+        const frame = stack.pop()
+        top().children.push(...frame.children)
+      }
+      return root.children
+    }
+
+    /** Materialize the virtual tree as React elements (keys are positional). */
+    function htmlToReact(nodes) {
+      return nodes.map((node, index) => typeof node === 'string'
+        ? node
+        : h(node.tag, { key: index, ...node.props }, ...htmlToReact(node.children ?? [])))
+    }
+
+    /** Materialize the virtual tree as DOM nodes (for toasts and modals). */
+    function htmlToDom(nodes) {
+      return nodes.map(node => {
+        if (typeof node === 'string') return document.createTextNode(node)
+        const el = document.createElement(node.tag)
+        for (const [key, value] of Object.entries(node.props ?? {})) {
+          if (key === 'style') { Object.assign(el.style, value); continue }
+          el.setAttribute(key, String(value))
+        }
+        for (const child of htmlToDom(node.children ?? [])) el.appendChild(child)
+        return el
+      })
+    }
+
+    // ── toasts: a vanilla-DOM host so pushes surface on every page ───────────
+    // Slot content only exists where the shell mounts it; a toast that lived
+    // inside the settings section would be invisible everywhere else. This
+    // host attaches to document.body, outside the app root, and needs no
+    // react-dom — the body renders through the same allowlist parser.
+    function toastHost() {
+      let host = document.querySelector('.ofm_toasts')
+      if (host === null) {
+        host = document.createElement('div')
+        host.className = 'ofm_toasts'
+        document.body.appendChild(host)
+      }
+      return host
+    }
+
+    function showToast({ title, body, html, tone, actions = [], holdMs = 10000 }) {
+      try {
+        const host = toastHost()
+        const card = document.createElement('div')
+        card.className = 'ofm_toast' + (tone === undefined ? '' : ` ${tone}`)
+        const head = document.createElement('div')
+        head.className = 'ofm_toasttitle'
+        head.appendChild(document.createTextNode(title ?? ''))
+        const close = document.createElement('button')
+        close.type = 'button'
+        close.className = 'ofm_toastclose'
+        // No locale lookup in here on purpose: showToast also runs from the
+        // push subscription before any `t` binding is in scope, and a throw
+        // inside this try/catch would silently swallow the whole toast.
+        close.setAttribute('aria-label', 'close')
+        close.title = '✕'
+        close.textContent = '✕'
+        close.addEventListener('click', () => card.remove())
+        head.appendChild(close)
+        card.appendChild(head)
+        if (body !== undefined && body !== '') {
+          const area = document.createElement('div')
+          area.className = 'ofm_toastbody'
+          area.textContent = String(body)
+          card.appendChild(area)
+        } else if (html !== undefined) {
+          const area = document.createElement('div')
+          area.className = 'ofm_toastbody'
+          for (const node of htmlToDom(parseSafeHtml(html))) area.appendChild(node)
+          card.appendChild(area)
+        }
+        if (actions.length > 0) {
+          const row = document.createElement('div')
+          row.className = 'ofm_toastactions'
+          for (const action of actions) {
+            const btn = document.createElement('button')
+            btn.type = 'button'
+            btn.className = 'ofm_btn'
+            btn.textContent = action.label
+            btn.addEventListener('click', () => { card.remove(); action.onClick?.() })
+            row.appendChild(btn)
+          }
+          card.appendChild(row)
+        }
+        host.appendChild(card)
+        while (host.children.length > 4) host.firstElementChild?.remove()
+        if (holdMs > 0) {
+          const timer = setTimeout(() => card.remove(), holdMs)
+          timer.unref?.()
+        }
+        return card
+      } catch { /* a toast must never break its caller */ }
+      return undefined
+    }
+
+    /** Modal surface for `urgent` announcements; dismiss runs the ack callback. */
+    function showUrgentModal({ title, html, confirmLabel, onClose }) {
+      try {
+        document.querySelector('.ofm_scrim[data-ofm-urgent]')?.remove()
+        const scrim = document.createElement('div')
+        scrim.className = 'ofm_scrim'
+        scrim.setAttribute('data-ofm-urgent', 'true')
+        const modal = document.createElement('div')
+        modal.className = 'ofm_modal'
+        modal.setAttribute('role', 'alertdialog')
+        modal.setAttribute('aria-modal', 'true')
+        const head = document.createElement('div')
+        head.className = 'ofm_modalhead'
+        head.textContent = title ?? ''
+        const body = document.createElement('div')
+        body.className = 'ofm_modalbody'
+        for (const node of htmlToDom(parseSafeHtml(html ?? ''))) body.appendChild(node)
+        const foot = document.createElement('div')
+        foot.className = 'ofm_modalfoot'
+        const ok = document.createElement('button')
+        ok.type = 'button'
+        ok.className = 'ofm_btn primary'
+        ok.textContent = confirmLabel ?? 'OK'
+        ok.addEventListener('click', () => { scrim.remove(); onClose?.() })
+        foot.appendChild(ok)
+        modal.appendChild(head)
+        modal.appendChild(body)
+        modal.appendChild(foot)
+        scrim.appendChild(modal)
+        document.body.appendChild(scrim)
+      } catch { /* a modal must never break its caller */ }
+    }
+
+    /** OS-level notification, only when the user both opted in and granted. */
+    function osNotify(title, body) {
+      try {
+        if (typeof Notification !== 'function' || Notification.permission !== 'granted') return
+        new Notification(title, { body: String(body ?? '').slice(0, 200) })
+      } catch { /* the in-app toast still fires */ }
     }
 
     const Switch = (props) => h('button', {
@@ -751,6 +1195,148 @@ window.__ModuleLoader__.load({
           h('span', { className: 'ofm_pill' }, `${t('pref.probedAt')}: ${ago(summary.probedAt, t.locale)}`)))
     }
 
+    // ── announcement center ──────────────────────────────────────────────────
+    const LEVEL_KEY = { info: 'level.info', update: 'level.update', warn: 'level.warn', urgent: 'level.urgent' }
+
+    function NewsPanel(props) {
+      const { t } = props
+      const news = useAsync(() => api('/announcements'), [])
+      const [busy, setBusy] = useState(false)
+      const [osError, setOsError] = useState('')
+      // Live refresh: the push subscription broadcasts to window on arrival.
+      useEffect(() => {
+        const handler = () => news.reload()
+        window.addEventListener('ofm:announcements', handler)
+        return () => window.removeEventListener('ofm:announcements', handler)
+      }, [news.reload])
+      const items = news.data?.items ?? []
+      const unread = news.data?.unread ?? 0
+      const notifyOs = news.data?.notifyOs === true
+      const ack = async payload => {
+        setBusy(true)
+        try { await post('/announcements/ack', payload); news.reload() } finally { setBusy(false) }
+      }
+      const refresh = async () => {
+        setBusy(true)
+        try { await post('/announcements/refresh'); news.reload() } finally { setBusy(false) }
+      }
+      const enableOs = async () => {
+        setOsError('')
+        if (typeof Notification === 'undefined') { setOsError(t('news.osDenied')); return }
+        let permission = 'default'
+        try { permission = await Notification.requestPermission() } catch { permission = Notification.permission }
+        if (permission !== 'granted') { setOsError(t('news.osDenied')); return }
+        try { await post('/settings', { notifyOs: true }) } catch { /* server state lags; permission is the gate */ }
+        news.reload()
+      }
+      return h(Panel, null,
+        h('div', { className: 'ofm_row' },
+          unread > 0 ? h('span', { className: 'ofm_pill strong' }, t('news.unread').replace('{n}', String(unread))) : null,
+          news.data?.error ? h('span', { className: 'ofm_pill' }, h('span', { className: 'ofm_dot warn' }), t('news.fetchFailed')) : null,
+          h('span', { className: 'ofm_pill' }, `${t('news.lastFetch')}: ${ago(news.data?.fetchedAt, t.locale)}`),
+          h('span', { className: 'spacer', style: { marginLeft: 'auto' } }),
+          h(Button, { disabled: busy || news.status !== 'ready', onClick: refresh }, busy ? t('news.refreshing') : t('news.refresh'))),
+        h('div', { className: 'ofm_row' },
+          notifyOs
+            ? h('span', { className: 'ofm_pill' }, h('span', { className: 'ofm_dot ok' }), t('news.osOn'))
+            : h(Button, { onClick: enableOs }, t('news.osEnable')),
+          osError !== '' ? h('span', { className: 'ofm_note' }, osError)
+            : notifyOs ? null : h('span', { className: 'ofm_pill' }, h('span', { className: 'ofm_dot' }), t('news.osOff')),
+          unread > 0 ? h('span', { style: { marginLeft: 'auto' } }, h(Button, { kind: 'ghost', disabled: busy, onClick: () => ack({ all: true }) }, t('news.allRead'))) : null),
+        news.status === 'loading' && news.data === undefined ? h('p', { className: 'ofm_note' }, t('loading')) : null,
+        news.status === 'error' ? h('p', { className: 'ofm_note' }, news.error) : null,
+        news.status === 'ready' && items.length === 0 ? h('p', { className: 'ofm_note' }, t('news.empty'), ' ', h('span', { style: { color: 'var(--dsw-alias-label-tertiary)' } }, t('news.emptyHint'))) : null,
+        h('div', { className: 'ofm_news' }, items.map(item => h(NewsItem, {
+          key: item.id, item, t, locale: t.locale, busy,
+          onAck: () => ack({ id: item.id }),
+        }))))
+    }
+
+    function NewsItem(props) {
+      const { item, t, locale, busy, onAck } = props
+      const body = useMemo(() => parseSafeHtml(item.html ?? ''), [item.html])
+      const acknowledged = item.acked === true
+      return h('article', { className: 'ofm_newsitem' + (acknowledged ? '' : ' unread') },
+        acknowledged ? null : h('span', { className: 'ofm_newsdot', 'aria-hidden': 'true' }),
+        h('div', { className: 'ofm_newshead' },
+          h('span', { className: 'ofm_level ' + item.level }, t(LEVEL_KEY[item.level] ?? 'level.info')),
+          h('span', { className: 'ofm_newstitle' }, item.title),
+          acknowledged ? null : h(Button, { kind: 'ghost', disabled: busy, onClick: onAck }, t('news.markRead'))),
+        h('div', { className: 'ofm_newsmeta' },
+          h('span', null, item.createdAt > 0 ? new Date(item.createdAt).toLocaleDateString() : ''),
+          h('span', null, ago(item.createdAt, locale)),
+          item.pinned === true ? h('span', null, '📌') : null),
+        h('div', { className: 'ofm_newsbody' }, ...htmlToReact(body)),
+        item.link?.url ? h('div', null, h('a', { href: item.link.url, target: '_blank', rel: 'noopener noreferrer' }, item.link.label || t('news.link'))) : null)
+    }
+
+    // ── in-app upgrade ───────────────────────────────────────────────────────
+    function UpgradePanel(props) {
+      const { t, settings, onApply, busy } = props
+      const status = useAsync(() => api('/update/status'), [])
+      const [phase, setPhase] = useState('')
+      const [message, setMessage] = useState('')
+      const [error, setError] = useState('')
+      useEffect(() => {
+        const handler = event => {
+          const version = event.detail?.version ?? ''
+          setPhase('')
+          setMessage(version === '' ? '' : t('upgrade.done').replace('{version}', version))
+          status.reload()
+        }
+        window.addEventListener('ofm:upgraded', handler)
+        return () => window.removeEventListener('ofm:upgraded', handler)
+      }, [status.reload])
+      const data = status.data
+      const check = async () => {
+        setPhase('checking'); setError('')
+        try { await post('/update/check'); status.reload() } catch (err) { setError(String(err?.message ?? err)) } finally { setPhase('') }
+      }
+      const applyUpgrade = async () => {
+        setPhase('applying'); setError(''); setMessage(t('upgrade.phase.download'))
+        try {
+          const result = await post('/update/apply', {})
+          // The successor instance has already pushed `upgraded` by the time the
+          // request settles; this message only covers a stream that never arrived.
+          setMessage(t('upgrade.phase.install'))
+          if (result?.version !== undefined) setMessage(t('upgrade.doneRefresh').replace('{version}', result.version))
+          status.reload()
+        } catch (err) {
+          setPhase(''); setMessage('')
+          setError(String(err?.message ?? err))
+          status.reload()
+        }
+      }
+      const notes = useMemo(() => parseSafeHtml(data?.notes ?? ''), [data?.notes])
+      const upToDate = data !== undefined && data.latest !== '' && data.available === false
+      return h(Panel, null,
+        h('div', { className: 'ofm_upgradecards' },
+          h('span', { className: 'ofm_pill strong' }, `${t('upgrade.current')}: ${data?.current || '…'}`),
+          data?.latest !== undefined && data.latest !== '' ? h('span', { className: 'ofm_pill' }, `${t('upgrade.latest')}: ${data.latest}`) : null,
+          data?.available === true ? h('span', { className: 'ofm_pill' }, h('span', { className: 'ofm_dot warn' }), t('upgrade.available').replace('{version}', data.latest)) : null,
+          upToDate ? h('span', { className: 'ofm_pill' }, h('span', { className: 'ofm_dot ok' }), t('upgrade.upToDate')) : null,
+          h('span', { className: 'ofm_pill' }, `${t('upgrade.checkedAt')}: ${data?.checkedAt ? ago(data.checkedAt, t.locale) : t('upgrade.never')}`)),
+        h('div', { className: 'ofm_row' },
+          h(Button, { disabled: phase !== '' || status.status !== 'ready', onClick: check }, phase === 'checking' ? t('upgrade.checking') : t('upgrade.check')),
+          data?.available === true ? h(Button, { kind: 'primary', disabled: phase !== '' || data.applying === true, onClick: applyUpgrade }, phase === 'applying' ? t('upgrade.applying') : t('upgrade.apply')) : null),
+        phase === 'applying' ? h('div', { className: 'ofm_prog' }, h('i')) : null,
+        message !== '' ? h('p', { className: 'ofm_note' }, message) : null,
+        error !== '' ? h('div', { className: 'ofm_callout ofm_error' }, t('upgrade.failed').replace('{message}', error)) : null,
+        notes.length > 0 ? h('div', { className: 'ofm_sec', style: { gap: 4 } },
+          h('span', { className: 'ofm_note' }, t('upgrade.notes')),
+          h('div', { className: 'ofm_upnotes ofm_newsbody' }, ...htmlToReact(notes))) : null,
+        data?.lastApplied !== undefined ? h('p', { className: 'ofm_note' },
+          `${t('upgrade.history')}: ${data.lastApplied.ok === true ? '✓' : '✗'} `,
+          t('upgrade.from').replace('{from}', data.lastApplied.from ?? '?'),
+          ` → ${data.lastApplied.to ?? '?'} · ${ago(data.lastApplied.at, t.locale)}`,
+          data.lastApplied.ok === false && data.lastApplied.error ? ` — ${data.lastApplied.error}` : '') : null,
+        h('p', { className: 'ofm_note' }, (settings.updateCheckHours ?? 0) > 0 ? t('upgrade.auto').replace('{n}', String(settings.updateCheckHours)) : t('upgrade.autoOff')),
+        h('div', { className: 'ofm_row' },
+          h(Button, { onClick: () => { setPhase('reloading'); setMessage(t('upgrade.phase.reload')); post('/reload').catch(() => {}).then(() => { setPhase('') }) } }, phase === 'reloading' ? t('reload.reloading') : t('reload.now')),
+          h(Switch, { checked: settings.autoReloadWatch === true, label: t('reload.auto'), onChange: () => onApply({ autoReloadWatch: !(settings.autoReloadWatch === true) }) }),
+          h('span', { className: 'ofm_note' }, t('reload.done').replace('{n}', String(settings.reloadCount ?? 0)))))
+    }
+
     // ── settings page ─────────────────────────────────────────────────────────
     function SettingsPage(props) {
       const tagged = props.locale === undefined ? props.t : Object.assign(x => props.t(x), { locale: props.locale })
@@ -797,15 +1383,17 @@ window.__ModuleLoader__.load({
             h(Button, { disabled: busy, onClick: async () => { setBusy(true); try { await post('/refresh'); summary.reload(); stats.reload() } finally { setBusy(false) } } }, summary.status === 'loading' ? t('probing') : t('refresh')),
             h(Button, { disabled: busy, onClick: async () => { setBusy(true); try { await post('/reprobe'); summary.reload() } finally { setBusy(false) } } }, t('reprobe')))),
         h(Section, { title: t('section.models'), hint: t('section.modelsHint') }, h(Roster, { summary: data, t: tagged, onBench: bench, benches })),
+        h(Section, { title: t('section.news'), hint: t('section.newsHint') }, h(NewsPanel, { t: tagged })),
         h(Section, { title: t('section.dash'), hint: t('section.dashHint') },
           stats.status === 'ready' && stats.data !== undefined ? h(Dashboard, { stats: stats.data, summary: data, t: tagged })
             : h('p', { className: 'ofm_note' }, t('loading'))),
         h(Section, { title: t('section.forward'), hint: t('section.forwardHint') }, h(Forward, { settings: data.settings, t: tagged, onApply: apply, busy })),
-        h(Section, { title: t('section.prefs'), hint: t('section.prefsHint') }, h(Preferences, { summary: data, t: tagged, onApply: apply, busy })))
+        h(Section, { title: t('section.prefs'), hint: t('section.prefsHint') }, h(Preferences, { summary: data, t: tagged, onApply: apply, busy })),
+        h(Section, { title: t('section.upgrade'), hint: t('section.upgradeHint') }, h(UpgradePanel, { t: tagged, settings: data.settings, onApply: apply, busy })))
     }
 
     // ── announcement ──────────────────────────────────────────────────────────
-    const PAGES = ['ann.preamble', 'ann.models', 'ann.steps', 'ann.features']
+    const PAGES = ['ann.preamble', 'ann.models', 'ann.steps', 'ann.features', 'ann.updates']
 
     function Announcement(props) {
       const { t, complete, openSection, page, setPage, summary, acknowledged } = props
@@ -833,10 +1421,10 @@ window.__ModuleLoader__.load({
           h('div', { className: 'ofm_annfoot' },
             h('span', { className: 'ofm_note' }, t('ann.page').replace('{n}', page + 1).replace('{total}', PAGES.length)),
             h('span', { className: 'spacer' }),
-            page === 0 ? h(Button, { kind: 'ghost', onClick: finish }, t('ann.later')) : h(Button, { kind: 'ghost', onClick: () => setPage(p => p - 1) }, '‹'),
+            page === 0 ? h(Button, { kind: 'ghost', onClick: finish }, t('ann.later')) : h(Button, { kind: 'ghost', onClick: () => setPage(p => Math.max(0, p - 1)) }, '‹'),
             last
               ? h(Button, { kind: 'primary', onClick: async () => { await finish(); openSection?.('our-free-model') } }, t('ann.openSettings'))
-              : h(Button, { kind: 'primary', onClick: () => setPage(p => p + 1) }, '›'))))
+              : h(Button, { kind: 'primary', onClick: () => setPage(p => Math.min(PAGES.length - 1, p + 1)) }, '›'))))
     }
 
     const list = (t, keys) => keys.map(key => h('li', { key }, t(key)))
@@ -860,9 +1448,12 @@ window.__ModuleLoader__.load({
       if (page === 2) return h(Fragment, null,
         h('h3', null, t('ann.steps')),
         h('ul', null, list(t, ['ann.s1', 'ann.s2', 'ann.s3', 'ann.s4'])))
-      return h(Fragment, null,
+      if (page === 3) return h(Fragment, null,
         h('h3', null, t('ann.features')),
         h('ul', null, list(t, ['ann.f1', 'ann.f2', 'ann.f3', 'ann.f4', 'ann.f5'])))
+      return h(Fragment, null,
+        h('h3', null, t('ann.updates')),
+        h('ul', null, list(t, ['ann.u1', 'ann.u2', 'ann.u3', 'ann.u4'])))
     }
 
     // ── registration ──────────────────────────────────────────────────────────
@@ -887,6 +1478,93 @@ window.__ModuleLoader__.load({
         document.head.appendChild(style)
         return () => style.remove()
       }, 'our-free-model: styles')
+
+      // ── push subscription ───────────────────────────────────────────────────
+      // One EventSource for the whole app surface: new announcements become
+      // toasts (and OS notifications when opted in), urgent ones open a modal,
+      // update availability and completed upgrades broadcast onto window so
+      // whichever panel is mounted can refresh itself. EventSource reconnects
+      // by itself; the hot reload closes every stream server-side, so a swap
+      // simply shows up as a fresh `hello` a second later.
+      ctx.effect(() => {
+        if (typeof EventSource !== 'function') return
+        let osEnabled = false
+        let disposed = false
+        let source
+        api('/announcements').then(payload => { osEnabled = payload?.notifyOs === true }).catch(() => {})
+        const open = () => {
+          if (disposed) return
+          source = new EventSource(`${API}/events`)
+          source.addEventListener('announcements', event => {
+            let data
+            try { data = JSON.parse(event.data) } catch { return }
+            for (const item of data.items ?? []) {
+              osNotify(t('toast.annTitle'), item.title)
+              if (item.level === 'urgent') {
+                showUrgentModal({
+                  title: `${t('news.urgentTitle')} · ${item.title}`,
+                  html: item.html ?? '',
+                  confirmLabel: t('news.gotIt'),
+                  onClose: () => { void post('/announcements/ack', { id: item.id }).catch(() => {}) },
+                })
+              } else {
+                showToast({ title: t('toast.annTitle'), body: item.title, tone: item.level === 'warn' ? 'warn' : undefined })
+              }
+            }
+            window.dispatchEvent(new CustomEvent('ofm:announcements', { detail: data }))
+          })
+          source.addEventListener('update', event => {
+            let data
+            try { data = JSON.parse(event.data) } catch { return }
+            osNotify(t('toast.updateTitle'), t('toast.updateBody').replace('{latest}', data.latest ?? '').replace('{current}', data.current ?? ''))
+            showToast({
+              title: t('toast.updateTitle'),
+              body: t('toast.updateBody').replace('{latest}', data.latest ?? '').replace('{current}', data.current ?? ''),
+              tone: 'warn', holdMs: 14000,
+            })
+            window.dispatchEvent(new CustomEvent('ofm:update', { detail: data }))
+          })
+          source.addEventListener('upgraded', event => {
+            let data
+            try { data = JSON.parse(event.data) } catch { data = {} }
+            window.dispatchEvent(new CustomEvent('ofm:upgraded', { detail: data }))
+          })
+          source.addEventListener('hello', event => {
+            let data
+            try { data = JSON.parse(event.data) } catch { data = {} }
+            window.dispatchEvent(new CustomEvent('ofm:hello', { detail: data }))
+          })
+        }
+        open()
+        return () => {
+          disposed = true
+          try { source?.close() } catch { /* already closed */ }
+        }
+      }, 'our-free-model: push subscription')
+
+      // A hot reload or in-app upgrade swaps this bundle while the page stays
+      // open. The only durable marker across that swap is localStorage, so the
+      // successor announces what happened exactly once.
+      ctx.effect(() => {
+        void (async () => {
+          try {
+            const meta = await api('/meta')
+            const at = Number(meta?.reloadedAt ?? 0)
+            if (at <= 0) return
+            let seen = ''
+            try { seen = window.localStorage?.getItem('ofm.reloadedAt') ?? '' } catch { /* storage unavailable */ }
+            if (String(at) === seen) return
+            try { window.localStorage?.setItem('ofm.reloadedAt', String(at)) } catch { /* ignore */ }
+            showToast({
+              title: meta.version !== '' ? `Our Free Model ${meta.version}` : 'Our Free Model',
+              body: t('reload.done').replace('{n}', String(meta.reloadCount ?? 0)),
+              actions: [{ label: t('reload.refresh'), onClick: () => { try { window.location.reload() } catch { /* top-level navigation refused */ } } }],
+              holdMs: 12000,
+            })
+          } catch { /* backend absent */ }
+        })()
+        return () => {}
+      }, 'our-free-model: reload notice')
 
       ctx.slots.inject('settings.section', () => ctx.slots.register({
         name: 'settings.section',
@@ -936,6 +1614,9 @@ window.__ModuleLoader__.load({
     exports.apply = apply
     exports.inject = inject
     exports.name = 'our-free-model'
+    // Test seam for scripts/sanitize-test.mjs: the parser runs headlessly with
+    // the same stub React the lint script uses.
+    exports.__test = { parseSafeHtml, safeUrl, sanitizeStyle, htmlToDom }
     return module.exports
   },
 })

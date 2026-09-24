@@ -6,6 +6,14 @@
  * browser-facing JSON API the settings page reads, and the OpenAI-compatible
  * forward listener.
  *
+ * On top of the model lane the plugin owns a small distribution channel of its
+ * own: a remote announcement feed the repository owner publishes by pushing a
+ * JSON document, an in-app self-updater that verifies and installs new releases
+ * from the same repository, and a self hot-reload that swaps the running plugin
+ * for the code now on disk. All three report to the browser over one
+ * Server-Sent-Events route, because the kernel has no notification service and
+ * the settings page should not have to poll.
+ *
  * Every harness facility is reached through `ctx` and declared in `inject`, so a
  * composition that omits one degrades that feature rather than failing the
  * plugin: no web server means no in-app dashboard, no timer means no background
@@ -17,26 +25,46 @@
 
 import path from 'node:path'
 import fs from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { FreeModelAdapter, ROUTE_LABELS, ROUTE_MAIN, ROUTE_REGION } from './src/adapter.js'
 import { JsonStore, SETTINGS_INITIAL, STATS_INITIAL, STATS_VERSION, DATA_DIR_NAME, MIN_DECODE_MS, decodeWindow, migrateStats, pruneDays, recordUsage, resolveDshHome } from './src/store.js'
 import { buildCatalog, parseListing, parseRouterCapabilities, parseRouterRegistry, UPSTREAM_MODELS_URL } from './src/catalog.js'
-import { STATE, detectEgress, fetchUpstreamIds, probeCatalog } from './src/probe.js'
+import { STATE, detectEgress, probeCatalog } from './src/probe.js'
 import { generateKey, startForwardServer } from './src/forward.js'
 import { CODE, UpstreamError } from './src/http.js'
 import { applyFingerprint, baseModelId, endpointFor, mintRequestId, sessionForConversation, wireFor } from './src/upstream.js'
 import { budgetFor, DEFAULT_LEVEL } from './src/effort.js'
 import { toChatMessages, toToolDefs } from './src/messages.js'
 import { windowTokens } from './src/stream.js'
+import { AnnouncementFeed } from './src/feed.js'
+import { PluginUpdater, restoreBackup } from './src/updater.js'
+import { selfReload, watchPackage, isReloading } from './src/reload.js'
+import { createPushHub } from './src/push.js'
+import { rejectionFor } from './src/trust.js'
 
 export const name = 'our-free-model'
+
+/** The installed package directory — the self-updater and hot reload operate here. */
+const PKG_URL = new URL('./', import.meta.url)
+const PKG_DIR = fileURLToPath(PKG_URL)
+const ENTRY_URL = new URL('index.js', import.meta.url).href
+
+/** Published version of the installed package, read once at load. */
+function readPackageVersion() {
+  try {
+    return String(JSON.parse(fs.readFileSync(path.join(PKG_DIR, 'package.json'), 'utf8')).version ?? '')
+  } catch {
+    return ''
+  }
+}
 
 /**
  * `llm` is what the plugin exists for; `webServer` carries the settings page's
  * data routes; `timer` carries the availability re-probe loop. Cordis withholds
  * any service a plugin does not name here, so this list has to match the direct
- * property accesses in `apply`. Optional collaborators (attachments) are reached
- * through `ctx.get()` instead, so their absence degrades one feature rather than
- * blocking activation.
+ * property accesses in `apply`. Optional collaborators (attachments, connection)
+ * are reached through `ctx.get()` instead, so their absence degrades one feature
+ * rather than blocking activation.
  */
 export const inject = ['llm', 'webServer', 'timer']
 
@@ -51,7 +79,7 @@ const FALLBACK_CATALOG = buildCatalog([
 ])
 
 /** Where the plugin's own announcement copy lives; bump it to re-announce. */
-export const ANNOUNCEMENT_VERSION = '2026-09-24.1'
+export const ANNOUNCEMENT_VERSION = '2026-09-25.1'
 
 /**
  * Resolve the harness attribution User-Agent.
@@ -78,6 +106,14 @@ export function apply(ctx, config) {
   const home = resolveDshHome()
   const dataDir = path.join(home, DATA_DIR_NAME)
   fs.mkdirSync(dataDir, { recursive: true })
+  const packageVersion = readPackageVersion()
+
+  // A hot reload re-enters apply with fresh stores; the generation counter lives
+  // on globalThis so the new instance knows it replaced a predecessor, and does
+  // the post-swap bookkeeping itself (the old closure must not touch stores
+  // after its own dispose — that would race the new instance's writes).
+  const generation = (globalThis[Symbol.for('our-free-model.generation')] ?? 0) + 1
+  globalThis[Symbol.for('our-free-model.generation')] = generation
 
   const settings = new JsonStore(path.join(dataDir, 'settings.json'), SETTINGS_INITIAL)
   const stats = new JsonStore(path.join(dataDir, 'stats.json'), STATS_INITIAL)
@@ -86,11 +122,60 @@ export function apply(ctx, config) {
 
   if (stats.get().version !== STATS_VERSION) stats.edit(migrateStats)
 
+  if (generation > 1) {
+    settings.update({ reloadedAt: Date.now(), reloadCount: generation - 1 })
+    settings.flush()
+  }
+
   let catalog = materializeCatalog(catalogStore.get().entries ?? [])
   let attributionUserAgent = 'deepseek-harness'
   let egress = availability.get().egress ?? null
   let forward = null
   let forwardError = ''
+
+  // ── push channel ────────────────────────────────────────────────────────────
+  const push = createPushHub({ logger })
+
+  /** Set of announcement ids the user has acknowledged. */
+  const ackedIds = () => new Set(Array.isArray(settings.get().announcementsAcked) ? settings.get().announcementsAcked : [])
+
+  const feed = new AnnouncementFeed({
+    settings: () => settings.get(),
+    cacheFile: path.join(dataDir, 'feed.json'),
+    onArrival: items => {
+      push.emit('announcements', { items, unread: feedView().unread })
+      refreshUpdatePush?.()
+    },
+    log: message => logger.info?.(message),
+  })
+  feed.load()
+
+  function feedView() {
+    return feed.view({ ackedIds: ackedIds() })
+  }
+
+  const updater = new PluginUpdater({
+    pkgDir: PKG_DIR,
+    dataDir,
+    settings: () => settings.get(),
+    log: message => logger.info?.(message),
+  })
+  /** Update versions we have already pushed a notification for. */
+  let updateNotifiedFor = typeof settings.get().updateNotifiedFor === 'string' ? settings.get().updateNotifiedFor : ''
+
+  /** Push an `update` event once per version (manual checks force a re-push). */
+  function pushUpdate(force = false) {
+    if (disposed) return
+    const status = updater.status()
+    if (status.available !== true || status.latest === '') return
+    if (!force && status.latest === updateNotifiedFor) return
+    updateNotifiedFor = status.latest
+    settings.update({ updateNotifiedFor: status.latest })
+    push.emit('update', { current: status.current, latest: status.latest, notes: status.notes })
+  }
+  let refreshUpdatePush = undefined
+  /** Set when this generation is disposed; late async callbacks must stand down. */
+  let disposed = false
 
   /** The immutable snapshot every adapter call binds to. */
   const state = () => ({
@@ -334,7 +419,60 @@ export function apply(ctx, config) {
       }))
   }
 
+  // ── hot reload + in-app upgrade ─────────────────────────────────────────────
+  /**
+   * Swap the running plugin for the code on disk. Called for explicit reloads
+   * and at the end of an upgrade; the updater's rollback directory is the disk
+   * safety net when the new code cannot start.
+   */
+  async function reloadFromDisk() {
+    const result = await selfReload(ctx, { logger, packageUrl: PKG_URL, entryUrl: ENTRY_URL })
+    if (result.ok) return result
+    // The registry is back on the old code; make the disk match it.
+    try { restoreBackup(updater.backupDir, PKG_DIR) } catch { /* best effort */ }
+    throw new Error(result.error)
+  }
+
+  async function applyUpgrade(version) {
+    if (isReloading()) throw new Error('a reload is already in progress')
+    const result = await updater.apply({ version })
+    // The next apply() picks this up and pushes `upgraded` once it is live.
+    globalThis[Symbol.for('our-free-model.pending-upgrade')] = result.version
+    try {
+      await reloadFromDisk()
+    } catch (error) {
+      // The successor will never boot, so it can never consume the marker —
+      // clear it or the next cold start would announce a phantom upgrade.
+      globalThis[Symbol.for('our-free-model.pending-upgrade')] = undefined
+      throw error
+    }
+    return { ...result, reloaded: true }
+  }
+
+  /**
+   * Watch the installed package and hot-reload when its files change.
+   * Off by default; the settings page flips it for development and demos.
+   */
+  let watcher = undefined
+  function syncWatcher() {
+    const wanted = settings.get().autoReloadWatch === true
+    if (wanted && watcher === undefined) {
+      watcher = watchPackage(PKG_DIR, {
+        logger,
+        onChange: () => {
+          if (isReloading()) return
+          logger.info?.('our-free-model: watched files changed; hot-reloading')
+          void reloadFromDisk().catch(error => logger.warn?.(`our-free-model: hot reload failed (${error?.message ?? error})`))
+        },
+      })
+    } else if (!wanted && watcher !== undefined) {
+      watcher()
+      watcher = undefined
+    }
+  }
+
   // ── browser-facing API ──────────────────────────────────────────────────────
+  const connection = typeof ctx.get === 'function' ? ctx.get('connection') : undefined
   const api = createApiRoutes({
     settings, stats, availability, catalog: () => catalog, state,
     refreshCatalog, refreshAvailability, syncForward,
@@ -384,13 +522,70 @@ export function apply(ctx, config) {
         sample: text.slice(0, 60),
       }
     },
+    meta: () => ({
+      version: packageVersion,
+      generation,
+      reloadedAt: settings.get().reloadedAt ?? 0,
+      reloadCount: settings.get().reloadCount ?? 0,
+      dataDir,
+      autoReloadWatch: settings.get().autoReloadWatch === true,
+      lastReload: globalThis[Symbol.for('our-free-model.last-reload')] ?? undefined,
+      purgeSample: globalThis[Symbol.for('our-free-model.purge-sample')] ?? undefined,
+    }),
+    announcements: {
+      view: feedView,
+      ack: ids => {
+        const current = new Set(ackedIds())
+        for (const id of ids) current.add(id)
+        settings.update({ announcementsAcked: [...current] })
+        settings.flush()
+        return feedView()
+      },
+      refresh: () => feed.poll(),
+    },
+    update: {
+      status: () => ({ ...updater.status(), notifiedFor: updateNotifiedFor }),
+      check: async () => {
+        const result = await updater.check()
+        pushUpdate(true)
+        return result
+      },
+      apply: applyUpgrade,
+    },
+    hotReload: () => reloadFromDisk(),
+    push,
+    connection,
     logger,
   })
 
   if (typeof ctx.webServer?.register === 'function') {
     ctx.effect(() => ctx.webServer.register({ kind: 'prefix', path: '/api/our-free-model', handler: api }), 'our-free-model: api routes')
+    // The events stream is an exact route: exact dispatch outranks the prefix,
+    // so the hub's handler owns the socket while every other path still lands
+    // on the JSON API.
+    ctx.effect(() => ctx.webServer.register({ kind: 'exact', path: '/api/our-free-model/events', handler: eventsRoute }), 'our-free-model: events stream')
   } else {
     logger.warn?.('our-free-model: no web server in this composition; the settings page will have no data source')
+  }
+
+  /** Adopt one request as a live push stream, after the trust fence. */
+  function eventsRoute(req, res) {
+    const rejection = rejectionFor(req, connection)
+    if (rejection !== undefined) {
+      res.writeHead(rejection, { 'content-type': 'text/plain; charset=utf-8' })
+      res.end(rejection === 401 ? 'unauthorized' : 'forbidden')
+      return
+    }
+    push.attach(req, res, helloPayload())
+  }
+
+  function helloPayload() {
+    return {
+      version: packageVersion,
+      announcements: { unread: feedView().unread, fetchedAt: feedView().fetchedAt },
+      update: { available: updater.status().available, latest: updater.status().latest },
+      reloadedAt: settings.get().reloadedAt ?? 0,
+    }
   }
 
   // ── boot + background loop ──────────────────────────────────────────────────
@@ -404,27 +599,71 @@ export function apply(ctx, config) {
 
   ctx.effect(() => () => { registration() }, 'our-free-model: adapter routes')
 
+  ctx.effect(() => () => {
+    disposed = true
+    push.dispose()
+    watcher?.()
+  }, 'our-free-model: push + watcher')
+
   ctx.effect(() => {
     void (async () => {
       attributionUserAgent = await resolveAttributionUserAgent(logger)
       await refreshCatalog({ probe: true })
       await syncForward()
+      syncWatcher()
       emitTopology()
+      push.emit('hello', helloPayload())
+      // An upgrade that ended in a hot reload reports from its successor.
+      const pending = globalThis[Symbol.for('our-free-model.pending-upgrade')]
+      if (pending !== undefined) {
+        globalThis[Symbol.for('our-free-model.pending-upgrade')] = undefined
+        settings.update({ installedVersion: pending })
+        settings.flush()
+        push.emit('upgraded', { version: pending, clientChanged: true })
+      }
     })().catch(error => logger.warn?.(`our-free-model: startup refresh failed (${error?.message ?? error})`))
   }, 'our-free-model: boot refresh')
 
-  const interval = settings.get().probeIntervalMinutes ?? 15
+  // Feed poll: shortly after boot, then on the configured period. Concurrency
+  // with a manual refresh is harmless — polls share one in-flight request.
+  ctx.effect(() => {
+    const first = setTimeout(() => { void feed.poll() }, 12_000)
+    first.unref?.()
+    return () => clearTimeout(first)
+  }, 'our-free-model: first feed poll')
+
+  const feedMinutes = Math.max(5, settings.get().feedPollMinutes ?? 30)
   if (typeof ctx.interval === 'function') {
+    ctx.effect(() => ctx.interval(() => {
+      void feed.poll()
+      const hours = settings.get().updateCheckHours ?? 6
+      if (hours > 0) void updater.check().then(() => pushUpdate(false)).catch(() => {})
+    }, feedMinutes * 60_000), 'our-free-model: feed + update poll')
     ctx.effect(() => ctx.interval(() => {
       void (async () => {
         await watchEgress()
         await refreshCatalog({ probe: true })
       })().catch(error => logger.warn?.(`our-free-model: periodic refresh failed (${error?.message ?? error})`))
-    }, Math.max(60, interval) * 60_000), 'our-free-model: probe loop')
+    }, Math.max(60, settings.get().probeIntervalMinutes ?? 15) * 60_000), 'our-free-model: probe loop')
     ctx.effect(() => ctx.interval(() => {
       void watchEgress().catch(() => {})
     }, 120_000), 'our-free-model: egress watch')
   }
+  // The first update check waits for the boot refresh to settle, then runs once
+  // even when the periodic poll is disabled (hours === 0 means opt out fully).
+  ctx.effect(() => {
+    const first = setTimeout(() => {
+      const hours = settings.get().updateCheckHours ?? 6
+      if (hours <= 0) return
+      void updater.check().then(() => pushUpdate(false)).catch(() => {})
+    }, 40_000)
+    first.unref?.()
+    return () => clearTimeout(first)
+  }, 'our-free-model: first update check')
+
+  // Keep the module-level "notified" marker in sync with the stored one so a
+  // reload does not re-toast the same version.
+  refreshUpdatePush = () => pushUpdate(false)
 
   function emitTopology() {
     try { ctx.emit?.('llm/adapters-updated') } catch { /* no listener surface */ }
@@ -434,7 +673,15 @@ export function apply(ctx, config) {
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
-/** Which route advertises which model, given the last probe. */
+/**
+ * Which route advertises which model, given the last probe.
+ *
+ * Every model in the catalog stays callable on one of the two routes: the main
+ * route carries whatever has not been refused for geography, including models a
+ * probe could not reach this round — a transient failure should not make a
+ * model vanish from the picker. Only region-gated models move to the dedicated
+ * route, and only while the user wants them shown.
+ */
 function computeMembership(catalog, availabilitySnapshot, settings) {
   const results = availabilitySnapshot?.results ?? {}
   const expose = settings?.exposeRegionModels !== false
@@ -442,14 +689,9 @@ function computeMembership(catalog, availabilitySnapshot, settings) {
   const region = []
   for (const entry of catalog) {
     const result = results[entry.id]
-    if (result === undefined) {
-      // Never probed: keep it reachable so a cold start is not silently empty.
-      main.push(entry.id)
-      continue
-    }
-    if (result.state === STATE.available) { main.push(entry.id); continue }
-    if (result.state === STATE.regionBlocked && expose) { region.push(entry.id); continue }
-    if (result.state === STATE.throttled) { main.push(entry.id); continue }
+    if (result !== undefined && result.state === STATE.regionBlocked && expose) { region.push(entry.id); continue }
+    if (result !== undefined && result.state === STATE.regionBlocked) continue
+    main.push(entry.id)
   }
   const membership = {}
   if (main.length > 0) membership[ROUTE_MAIN] = main
@@ -586,66 +828,113 @@ function foldForwardOutcome(outcome, chunk) {
 /**
  * The settings page's HTTP surface.
  *
- * Same-origin, session-scoped, and readable only by whoever already has the app's
- * own port — so it deliberately carries no secret values: the forward key is
- * exposed only through its own explicit action, and only ever to the local page
- * that asks for it.
+ * Every route runs the trust fence first: the connection service's own
+ * admission when the composition mounts it (the same check the kernel applies
+ * to `/api`), otherwise the structural replica in src/trust.js. The plugin's
+ * prefix outranks `/api` in webServer's longest-prefix dispatch, so without
+ * this fence these routes would answer callers the app itself would refuse.
  */
 function createApiRoutes(deps) {
   return async function handler(req, res) {
     const url = new URL(req.url ?? '/', 'http://localhost')
-    const path = url.pathname.replace(/^\/api\/our-free-model/, '').replace(/\/+$/, '') || '/'
+    const routePath = url.pathname.replace(/^\/api\/our-free-model/, '').replace(/\/+$/, '') || '/'
     const method = String(req.method ?? 'GET').toUpperCase()
+    const rejection = rejectionFor(req, deps.connection)
     const send = (status, payload) => {
       const body = JSON.stringify(payload)
       res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
       res.end(body)
     }
+    if (rejection !== undefined) return send(rejection, { error: rejection === 401 ? 'unauthorized' : 'forbidden' })
     try {
-      if (method === 'GET' && path === '/summary') {
+      if (method === 'GET' && routePath === '/summary') {
         return send(200, buildSummary(deps))
       }
-      if (method === 'GET' && path === '/stats') {
+      if (method === 'GET' && routePath === '/stats') {
         return send(200, buildStats(deps.stats.get(), deps.catalog()))
       }
-      if (method === 'GET' && path === '/announcement') {
+      if (method === 'GET' && routePath === '/meta') {
+        return send(200, { ...deps.meta(), feed: { fetchedAt: deps.announcements.view().fetchedAt, source: deps.announcements.view().source, error: deps.announcements.view().error }, update: deps.update.status() })
+      }
+      if (method === 'GET' && routePath === '/announcement') {
         return send(200, { version: ANNOUNCEMENT_VERSION, acknowledged: deps.settings.get().announcementAck === ANNOUNCEMENT_VERSION })
       }
-      if (method === 'POST' && path === '/announcement/ack') {
+      if (method === 'POST' && routePath === '/announcement/ack') {
         deps.settings.update({ announcementAck: String(url.searchParams.get('version') ?? ANNOUNCEMENT_VERSION) })
         deps.settings.flush()
         return send(200, { ok: true })
       }
-      if (method === 'POST' && path === '/settings') {
+      if (method === 'GET' && routePath === '/announcements') {
+        const view = deps.announcements.view()
+        return send(200, { ...view, acked: [...ackedSet(deps)], notifyOs: deps.settings.get().notifyOs === true })
+      }
+      if (method === 'POST' && routePath === '/announcements/ack') {
+        const body = await readJson(req)
+        const acked = ackedSet(deps)
+        if (body.all === true) acked.clear()
+        if (typeof body.id === 'string' && body.id !== '') acked.add(body.id)
+        deps.announcements.ack(acked)
+        return send(200, { ok: true, view: deps.announcements.view() })
+      }
+      if (method === 'POST' && routePath === '/announcements/refresh') {
+        await deps.announcements.refresh()
+        return send(200, { ok: true, view: deps.announcements.view() })
+      }
+      if (method === 'GET' && routePath === '/update/status') {
+        return send(200, deps.update.status())
+      }
+      if (method === 'POST' && routePath === '/update/check') {
+        const result = await deps.update.check()
+        return send(200, { ...result, status: deps.update.status() })
+      }
+      if (method === 'POST' && routePath === '/update/apply') {
+        const body = await readJson(req)
+        const result = await deps.update.apply(body?.version === undefined ? undefined : String(body.version))
+        return send(200, { ok: true, ...result })
+      }
+      if (method === 'POST' && routePath === '/reload') {
+        // Answer first, then swap: the response rides an already-accepted
+        // socket, but the client should not wait on the reload finishing. The
+        // swap closure is `deps.hotReload`, applied inside `apply` — this
+        // module-level handler has no access to the fiber's own context.
+        send(202, { ok: true, note: 'hot reload started' })
+        setTimeout(() => {
+          Promise.resolve()
+            .then(() => deps.hotReload())
+            .catch(error => deps.logger?.warn?.(`our-free-model: hot reload failed (${error?.message ?? error})`))
+        }, 50).unref?.()
+        return
+      }
+      if (method === 'POST' && routePath === '/settings') {
         const patch = await readJson(req)
         const current = deps.settings.get()
-        const next = { ...current, ...pick(patch, ['enabled', 'exposeRegionModels', 'probeIntervalMinutes', 'defaultMaxTokens', 'announcementAck']) }
+        const next = { ...current, ...pick(patch, ['enabled', 'exposeRegionModels', 'probeIntervalMinutes', 'defaultMaxTokens', 'announcementAck', 'feedUrl', 'feedPollMinutes', 'notifyOs', 'updateCheckHours', 'autoReloadWatch']) }
         if (patch.forward !== undefined) next.forward = { ...(current.forward ?? {}), ...pick(patch.forward, ['enabled', 'host', 'port']) }
         deps.settings.update(next)
         deps.settings.flush()
         await deps.syncForward()
-        if (patch.probeIntervalMinutes !== undefined) {
-          // The interval lives in a fiber effect; the next boot picks the new
-          // value up, so surface that rather than pretending it hot-applied.
-          deps.logger.info?.('our-free-model: probe interval change applies on the next load')
+        if (patch.probeIntervalMinutes !== undefined || patch.feedPollMinutes !== undefined) {
+          // Poll periods live in fiber effects; the next load picks a change up,
+          // so surface that rather than pretending it hot-applied.
+          deps.logger.info?.('our-free-model: poll interval change applies on the next load')
         }
         return send(200, { ok: true, settings: publicSettings(deps.settings.get(), deps.forwardInfo()) })
       }
-      if (method === 'POST' && path === '/refresh') {
+      if (method === 'POST' && routePath === '/refresh') {
         await deps.refreshCatalog({ probe: true })
         return send(200, { ok: true, ...buildSummary(deps) })
       }
-      if (method === 'POST' && path === '/reprobe') {
+      if (method === 'POST' && routePath === '/reprobe') {
         await deps.refreshAvailability()
         return send(200, { ok: true, ...buildSummary(deps) })
       }
-      if (method === 'GET' && path === '/forward/key') {
+      if (method === 'GET' && routePath === '/forward/key') {
         return send(200, { key: deps.settings.get().forwardKey ?? '' })
       }
-      if (method === 'POST' && path === '/forward/rotate') {
+      if (method === 'POST' && routePath === '/forward/rotate') {
         return send(200, { key: deps.rotateKey() })
       }
-      if (method === 'POST' && path === '/bench') {
+      if (method === 'POST' && routePath === '/bench') {
         const body = await readJson(req)
         const result = await deps.testModel(String(body.model ?? ''), body.effort === undefined ? undefined : String(body.effort))
         return send(200, result)
@@ -655,6 +944,11 @@ function createApiRoutes(deps) {
       return send(500, { error: String(error?.message ?? error) })
     }
   }
+}
+
+function ackedSet(deps) {
+  const value = deps.settings.get().announcementsAcked
+  return new Set(Array.isArray(value) ? value : [])
 }
 
 function pick(source, keys) {
@@ -677,6 +971,13 @@ function publicSettings(settings, forwardInfo) {
     probeIntervalMinutes: settings.probeIntervalMinutes ?? 15,
     defaultMaxTokens: settings.defaultMaxTokens ?? 32768,
     announcementAck: settings.announcementAck ?? '',
+    feedUrl: typeof settings.feedUrl === 'string' ? settings.feedUrl : '',
+    feedPollMinutes: settings.feedPollMinutes ?? 30,
+    notifyOs: settings.notifyOs === true,
+    updateCheckHours: settings.updateCheckHours ?? 6,
+    autoReloadWatch: settings.autoReloadWatch === true,
+    reloadedAt: settings.reloadedAt ?? 0,
+    reloadCount: settings.reloadCount ?? 0,
     forward: { ...(settings.forward ?? {}), running: forwardInfo.running, actualPort: forwardInfo.port, error: forwardInfo.error },
   }
 }
@@ -685,6 +986,8 @@ function buildSummary(deps) {
   const state = deps.state()
   const snapshot = deps.availability.get()
   const forwardInfo = deps.forwardInfo()
+  const update = deps.update.status()
+  const feedView = deps.announcements.view()
   return {
     catalog: state.catalog.map(entry => ({
       ...entry,
@@ -700,6 +1003,9 @@ function buildSummary(deps) {
     egress: forwardInfo.egress ?? snapshot.egress ?? null,
     probedAt: snapshot.at ?? 0,
     announcementVersion: ANNOUNCEMENT_VERSION,
+    version: deps.meta().version,
+    announcements: { unread: feedView.unread, fetchedAt: feedView.fetchedAt },
+    update: { available: update.available, latest: update.latest, current: update.current, checkedAt: update.checkedAt, applying: update.applying },
   }
 }
 
@@ -750,4 +1056,3 @@ export function buildStats(stats, catalog) {
     },
   }
 }
-

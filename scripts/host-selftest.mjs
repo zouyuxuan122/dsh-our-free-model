@@ -53,7 +53,9 @@ class Readable_stub {
   constructor(method, url, body) {
     this.method = method
     this.url = url
-    this.headers = { authorization: 'internal-api' }
+    // A loopback Host is what the trust fence requires of every caller; the
+    // stub plays the part of the app's own web page.
+    this.headers = { authorization: 'internal-api', host: '127.0.0.1:3000' }
     this.__body = body === undefined ? null : JSON.stringify(body)
   }
 
@@ -67,10 +69,30 @@ class Readable_stub {
 const ctx = fakeContext()
 apply(ctx, {})
 
+/** Drive one request through the mounted prefix route and parse the JSON. */
+const call = async (method, url, body) => {
+  let status = 0, payload = ''
+  const req = new Readable_stub(method, url, body)
+  const res = {
+    writeHead: code => { status = code },
+    end: text => { payload = String(text ?? '') },
+    get headersSent() { return status !== 0 },
+  }
+  await ctx.__routes[0].handler(req, res)
+  try { return { status, json: JSON.parse(payload) } } catch { return { status, raw: payload.slice(0, 200) } }
+}
+
 // Let the boot refresh finish: listing + router overlay + a full availability probe.
-const deadline = Date.now() + 90000
+const deadline = Date.now() + 120000
 while (Date.now() < deadline && !(captured.adapters.length > 0 && ctx.__routes.length > 0)) {
   await new Promise(resolve => setTimeout(resolve, 500))
+}
+// Groups are snapshotted below, so wait until the first probe has landed — a
+// picker captured mid-probe would show the fallback catalog and stale grouping.
+while (Date.now() < deadline) {
+  const summary = await call('GET', '/api/our-free-model/summary').catch(() => ({ json: null }))
+  if (summary.json?.probedAt > 0 && Array.isArray(summary.json?.catalog) && summary.json.catalog.length > 0) break
+  await new Promise(resolve => setTimeout(resolve, 1000))
 }
 const boot = captured.adapters[0]
 if (boot === undefined) { console.log('FAIL: adapter never registered\n' + logs.join('\n')); process.exit(1) }
@@ -167,17 +189,6 @@ console.log('\n=== 6. settings API through the mounted webServer route ===')
 const handler = ctx.__routes[0]?.handler
 if (handler === undefined) console.log('  no route registered')
 else {
-  const call = async (method, url, body) => {
-    let status = 0, payload = ''
-    const req = Object.assign(new Readable_stub(method, url, body), {})
-    const res = {
-      writeHead: code => { status = code },
-      end: text => { payload = String(text ?? '') },
-      get headersSent() { return status !== 0 },
-    }
-    await handler(req, res)
-    try { return { status, json: JSON.parse(payload) } } catch { return { status, raw: payload.slice(0, 200) } }
-  }
   const summary = await call('GET', '/api/our-free-model/summary')
   console.log(`  GET  /summary  -> ${summary.status} models=${summary.json?.catalog?.length} egress=${JSON.stringify(summary.json?.egress)} probedAt=${summary.json?.probedAt > 0}`)
   const stats = await call('GET', '/api/our-free-model/stats')
@@ -186,6 +197,29 @@ else {
   console.log(`  GET  /announcement -> ${announce.status} version=${announce.json?.version === ANNOUNCEMENT_VERSION} ack=${announce.json?.acknowledged}`)
   const bench = await call('POST', '/api/our-free-model/bench', { model: target.id, effort: 'light' })
   console.log(`  POST /bench    -> ${bench.status} ${JSON.stringify(bench.json?.ttftMs ?? bench.json?.error)}ms ttft, ${bench.json?.tokensPerSecond === null ? 'no measurable rate' : JSON.stringify(bench.json?.tokensPerSecond)} tok/s`)
+
+  console.log('\n--- 6b. the new distribution surface (meta / announcements / update) ---')
+  const meta = await call('GET', '/api/our-free-model/meta')
+  console.log(`  GET  /meta          -> ${meta.status} version=${JSON.stringify(meta.json?.version)} generation=${meta.json?.generation}`)
+  const anns = await call('GET', '/api/our-free-model/announcements')
+  console.log(`  GET  /announcements -> ${anns.status} items=${anns.json?.items?.length} unread=${anns.json?.unread} error=${JSON.stringify(anns.json?.error?.slice(0, 60) ?? '')}`)
+  const refreshed = await call('POST', '/api/our-free-model/announcements/refresh')
+  console.log(`  POST /announcements/refresh -> ${refreshed.status} items=${refreshed.json?.view?.items?.length} fetchedAt=${refreshed.json?.view?.fetchedAt > 0}`)
+  const withArrivals = refreshed.json?.view?.items?.length > 0
+  if (withArrivals) {
+    const acked = await call('POST', '/api/our-free-model/announcements/ack', { id: refreshed.json.view.items[0].id })
+    console.log(`  POST /announcements/ack -> ${acked.status} unread=${acked.json?.view?.unread}`)
+  }
+  const fence = await (async () => {
+    const res = { status: 0, body: '', writeHead: code => { res.status = code }, end: text => { res.body = String(text ?? '') }, get headersSent() { return res.status !== 0 } }
+    const hostile = new Readable_stub('GET', '/api/our-free-model/summary')
+    hostile.headers = { host: 'evil.example:3000', origin: 'http://evil.example:3000' }
+    await handler(hostile, res)
+    return res.status
+  })()
+  console.log(`  GET  /summary from a non-loopback Host -> ${fence} (must be 403)`)
+  const update = await call('GET', '/api/our-free-model/update/status')
+  console.log(`  GET  /update/status -> ${update.status} current=${JSON.stringify(update.json?.current)} latest=${JSON.stringify(update.json?.latest)} err=${JSON.stringify(update.json?.error?.slice(0, 60) ?? '')}`)
 }
 
 console.log('\n=== 7. forward listener (OpenAI compatible) ===')

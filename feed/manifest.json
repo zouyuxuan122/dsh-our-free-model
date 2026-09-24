@@ -1,0 +1,138 @@
+{
+  "version": "1.1.2",
+  "base": "../",
+  "publishedAt": "2026-09-24T20:58:05.208Z",
+  "notes": "",
+  "files": [
+    {
+      "path": "client.js",
+      "size": 102483,
+      "sha256": "e811c657efbd4cf6dea734003676888abea2536904fbe146c4f04be26d1969c5"
+    },
+    {
+      "path": "cordis.patch.yml",
+      "size": 306,
+      "sha256": "660a0d2d7907b971d6f145a322be614cff01593e2b7fbd879f6635ee72c85abb"
+    },
+    {
+      "path": "icon.svg",
+      "size": 799,
+      "sha256": "5defa75a04e1b4262f80fdcf3eac8d04bef64d62881b2486a427238e34ec6fac"
+    },
+    {
+      "path": "index.js",
+      "size": 47426,
+      "sha256": "d97f381b63edbb7888017fe57d4ec6fdb726dc7d5f11ae37789027ebfce588de"
+    },
+    {
+      "path": "LICENSE",
+      "size": 1069,
+      "sha256": "f767664181b6f4ece8a2164da7c86b59a097eaffc17520f9f0f5e6bc070cd5f6"
+    },
+    {
+      "path": "locale/en.json",
+      "size": 276,
+      "sha256": "c088b91c21037d9a3de0b1752b3744214f92427f5c1f31e0ef53de31bb876c04"
+    },
+    {
+      "path": "locale/zh.json",
+      "size": 280,
+      "sha256": "6d8b01fcc390091e809b4c92d994b2b0c9d5d88e7a78ab589740577016c406e7"
+    },
+    {
+      "path": "package.json",
+      "size": 1144,
+      "sha256": "277548faaae11b62c9183da02f47061071c6b8b6de5e1cdc5e1c2d9ed1fe6d44"
+    },
+    {
+      "path": "README_EN.md",
+      "size": 24308,
+      "sha256": "8f35c1da2f4304a681ce51e1742df0eba30aafef153e52bfd31f1a244c06f71b"
+    },
+    {
+      "path": "README.md",
+      "size": 23397,
+      "sha256": "dcd40cc7d1b056477ce76a958d56144687b9329c2469b28e25a4d6be5c3947fa"
+    },
+    {
+      "path": "src/adapter.js",
+      "size": 11932,
+      "sha256": "6926658d2657548869364ad38ee1a208372755da48db51849c27be42b35a0bca"
+    },
+    {
+      "path": "src/catalog.js",
+      "size": 8080,
+      "sha256": "16bfe5da58d20b83e0785f900fb7b16b27f85028a89df9bc0d95ccfc8a18b2e4"
+    },
+    {
+      "path": "src/channel.js",
+      "size": 1292,
+      "sha256": "c1b80fdaac75fa320fd619b5dd09d796a8c4b1c8f58af07b921f548a5604c357"
+    },
+    {
+      "path": "src/effort.js",
+      "size": 3364,
+      "sha256": "9cf246d5f252077b3c3c5d28be734006fdba4aca59a0e4412fe9b2bd8701dcb1"
+    },
+    {
+      "path": "src/feed.js",
+      "size": 9940,
+      "sha256": "0754a2f474300e3b52395a83134e462746164433a53963c4617526f54c0c8e03"
+    },
+    {
+      "path": "src/forward.js",
+      "size": 12583,
+      "sha256": "2cafa930972ff8a8c97915f81d5d2bf9a461a940c4f70475bacb7f4e028560f7"
+    },
+    {
+      "path": "src/http.js",
+      "size": 8853,
+      "sha256": "434c05868ee8607421db6ce49676737bd39b698f81101d90e6c62778471084aa"
+    },
+    {
+      "path": "src/messages.js",
+      "size": 11945,
+      "sha256": "4869d40a83e61b1ee69c7da4a34722058f2a1470f6001ee6a93271422bf4b224"
+    },
+    {
+      "path": "src/probe.js",
+      "size": 6230,
+      "sha256": "99ed3e576598eb19441af03dbf5ec51c621b80e36b29741471f6bda6f9c9ac32"
+    },
+    {
+      "path": "src/push.js",
+      "size": 3210,
+      "sha256": "0e99ad2094a005846a98da69f51b0546e96dbd12b6e2448747ebaf61a987f2dd"
+    },
+    {
+      "path": "src/reload.js",
+      "size": 9003,
+      "sha256": "252bce180b6bb74d4071ef8f881e0620f9d7d10544a72cef0fbaeb23cca3a877"
+    },
+    {
+      "path": "src/store.js",
+      "size": 11471,
+      "sha256": "905b63f2af90ce8912887703b2fdaedb4eda50fd62823e82579915674eb8944e"
+    },
+    {
+      "path": "src/stream.js",
+      "size": 13120,
+      "sha256": "c0609a1bf46fd704e52e6fa7d4835448aae6350178249e5d6e434cd697ccb3e6"
+    },
+    {
+      "path": "src/trust.js",
+      "size": 3549,
+      "sha256": "15960d2849f9884ccdfed047aa609df5e5f6758738a047f5b7d6fa14afcf564a"
+    },
+    {
+      "path": "src/updater.js",
+      "size": 19780,
+      "sha256": "8ef5e32c0cdc6381d0cb7e7a3414d626c8d965c346f0c58bf70f6986c59e1ed1"
+    },
+    {
+      "path": "src/upstream.js",
+      "size": 8952,
+      "sha256": "4a57ae920f8f833dc1b55d87fabb388ee6effdbf4fd78f1cfa330bddf0aa9a81"
+    }
+  ]
+}

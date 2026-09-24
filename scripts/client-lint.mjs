@@ -83,7 +83,8 @@ for (const language of ['zh', 'en']) {
 /** Keys reached through a template or a table rather than a `t('literal')`. */
 const INDIRECT = new Set([
   'state.available', 'state.region-blocked', 'state.throttled', 'state.unavailable', 'state.unknown',
-  'ann.preamble', 'ann.models', 'ann.steps', 'ann.features',
+  'ann.preamble', 'ann.models', 'ann.steps', 'ann.features', 'ann.updates',
+  'level.info', 'level.update', 'level.warn', 'level.urgent',
 ])
 
 for (const language of ['zh', 'en']) {
@@ -111,12 +112,54 @@ if (css.length === 0) problems.push('the stylesheet block was not located')
 const declared = new Set([...css.matchAll(/\.(ofm_[A-Za-z0-9_]+)/g)].map(match => match[1]))
 
 const referenced = new Set()
-// Any quoted or templated run that carries a class name. Interpolations are
-// stripped first, so a `ofm_btn${x ? ' x' : ''}` contributes only `ofm_btn`.
-const QUOTED = /(['"`])((?:\\.|(?!\1)[^\\])*)\1/g
-const INTERPOL = /\$\{(?:[^{}]|\{[^{}]*\})*\}/g
-for (const match of source.matchAll(QUOTED)) {
-  const run = match[2].replace(INTERPOL, ' ')
+// Any quoted or templated run that carries a class name. The scan walks the
+// source with a small state machine so that quotes inside comments and inside
+// regex literals (the attribute parser has both) cannot unbalance a naive
+// global regex and swallow the rest of the file. Regex literals are skipped
+// when a literal can start there; division after a value keeps scanning.
+function* stringRuns(src) {
+  const REGEX_PRECEDERS = new Set(['(', ',', '=', ':', '[', '!', '&', '|', '?', '{', '}', ';', '>', '+', '-', '*', '%', '~', '^'])
+  let i = 0
+  let prev = ''
+  while (i < src.length) {
+    const ch = src[i]
+    if (ch === '/' && src[i + 1] === '/') { i = src.indexOf('\n', i); if (i === -1) break; i += 1; continue }
+    if (ch === '/' && src[i + 1] === '*') { i = src.indexOf('*/', i) + 2; continue }
+    if (ch === '"' || ch === "'" || ch === '`') {
+      let j = i + 1
+      let run = ''
+      while (j < src.length && src[j] !== ch) {
+        if (src[j] === '\\') { run += src[j] + src[j + 1] ?? ''; j += 2; continue }
+        run += src[j]
+        j += 1
+      }
+      yield run
+      i = j + 1
+      prev = 'x'
+      continue
+    }
+    if (ch === '/' && REGEX_PRECEDERS.has(prev)) {
+      let j = i + 1
+      let inClass = false
+      while (j < src.length) {
+        const c = src[j]
+        if (c === '\\') { j += 2; continue }
+        if (c === '[') inClass = true
+        else if (c === ']') inClass = false
+        else if (c === '/' && !inClass) break
+        j += 1
+      }
+      j += 1
+      while (j < src.length && /[a-z]/.test(src[j])) j += 1
+      i = j
+      prev = 'x'
+      continue
+    }
+    if (!/\s/.test(ch)) prev = ch
+    i += 1
+  }
+}
+for (const run of stringRuns(source)) {
   for (const token of run.split(/[\s,]+/)) if (/^ofm_[A-Za-z0-9_]+$/.test(token)) referenced.add(token)
 }
 

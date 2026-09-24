@@ -1,0 +1,13 @@
+{
+  "$schema": "./announcements.schema.md",
+  "announcements": [
+    {
+      "id": "2026-09-25-v1.1.2-release",
+      "title": "v1.1.2：公告中心、应用内升级与热重载上线",
+      "level": "update",
+      "pinned": true,
+      "createdAt": "2026-09-25T00:00:00Z",
+      "html": "<p><strong>Our Free Model v1.1.2</strong> 发布，本次更新带来四个新能力：</p><ul><li><strong>公告中心</strong>——仓库主人推送的新公告实时到达（支持图文排版），紧急公告全屏强提醒。</li><li><strong>系统通知</strong>——在公告中心开启后，新公告与插件更新弹出系统级通知（桌面端经系统通道发送）。</li><li><strong>应用内升级</strong>——设置 → 插件升级 一键升级：下载、SHA-256 校验、备份、安装、热重载全自动。</li><li><strong>热重载</strong>——升级与代码更新即时生效，无需重启应用。</li></ul><p>同时：全部模型保持可达（探测失败不再从选择器消失），插件接口加上了与内核一致的鉴权围栏。</p>"
+    }
+  ]
+}

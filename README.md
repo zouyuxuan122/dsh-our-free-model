@@ -181,6 +181,20 @@ node scripts/build-manifest.mjs
 用户确认后下载、校验、备份、替换、热重载全部在应用内完成。清单会校验每个文件的
 SHA-256，并在安装前重新拉取一次，避免用陈旧清单校验新文件。
 
+**关于源顺序与网络现实**：插件按 `jsDelivr → raw.githubusercontent(main) → (master)`
+的顺序拉取，全部失败时降级到上一次的缓存并如实标注错误。jsDelivr 优先是因为
+raw.githubusercontent 在部分网络（实测本机 CN 出口 + Watt Toolkit 类加速工具）会被
+本地反代劫持——git push 正常但 raw 对新文件返回假 404；jsDelivr 的边缘节点直连可达，
+请求自动附带分钟级 cache-buster，不会被 CDN 长缓存拖住新鲜度。
+
+两个发布者须知：
+1. **jsDelivr 对新仓库的首次收录有延迟**（几分钟到数小时不等，创建 Release 会触发
+   收录）；收录完成前，新推送的公告/更新会暂时拉取不到（客户端显示缓存并标注
+   源不可达）。收录只发生一次，之后 `@main` 的更新经由 cache-buster 准实时可达。
+2. 可用 `https://purge.jsdelivr.net/gh/<仓库>@main/<路径>` 手动刷新 jsDelivr 缓存。
+   用 `feedUrl` 设置可把源指向任意 URL（含 `{repo}` 占位符），本地测试时指向一个
+   静态文件服务器即可。
+
 ## 实现结构
 
 ```text

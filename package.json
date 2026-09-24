@@ -1,0 +1,45 @@
+{
+  "name": "dsh-our-free-model",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Our Free Model — 免密免费模型直连：模型清单随上游更新、地区可用性自动探测、思考强度真实生效、Token 热力图与吞吐看板，并附 OpenAI 格式本地转发端口。",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "src",
+    "locale",
+    "icon.svg",
+    "cordis.patch.yml",
+    "LICENSE",
+    "README.md",
+    "README_ZH.md"
+  ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "free-model",
+    "llm-provider"
+  ],
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": []
+    }
+  },
+  "license": "MIT"
+}

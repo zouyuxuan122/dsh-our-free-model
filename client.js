@@ -34,6 +34,7 @@ window.__ModuleLoader__.load({
       zh: {
         'meta.title': 'Our Free Model',
         'meta.description': '在 DeepSeek Harness 内直连免密免费模型：清单随上游更新、地区可用性自动探测、思考强度真实生效，并附 Token 看板与 OpenAI 兼容转发端口。',
+        'ann.pitch': '你只需在 dsh 里装上这个插件，无需登录、注册、填 API Key 或任何其它操作，就能用上包括 Muse Spark 1.3、MiMo V2.6 在内的前沿模型——完全免费，不限量。',
         nav: 'Our Free Model',
         title: 'Our Free Model',
         subtitle: '免密免费模型 · 实时可用性',
@@ -134,6 +135,7 @@ window.__ModuleLoader__.load({
       en: {
         'meta.title': 'Our Free Model',
         'meta.description': 'Free no-key models inside DeepSeek Harness: a roster that follows upstream, live regional availability, genuinely enforced thinking levels, a token dashboard and an OpenAI-compatible local forward port.',
+        'ann.pitch': 'All you do is install this plugin in dsh — no login, no sign-up, no API key, no other step of any kind. The frontier models are simply there, Muse Spark 1.3 and MiMo V2.6 among them. Completely free, with no usage cap.',
         nav: 'Our Free Model',
         title: 'Our Free Model',
         subtitle: 'No-key free lane · live availability',
@@ -318,7 +320,13 @@ window.__ModuleLoader__.load({
 .ofm_stat b{display:block;font-size:16px;font-weight:680;font-variant-numeric:tabular-nums;letter-spacing:-.3px}
 .ofm_stat span{font-size:10.5px;color:var(--dsw-alias-label-tertiary)}
 /* announcement */
-.ofm_ann{width:min(620px,92vw);border-radius:18px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);box-shadow:0 24px 70px rgb(0 0 0 / 34%);overflow:hidden;display:flex;flex-direction:column}
+/* The onboarding slot is mounted inside the collapsed sidebar foot of the shell,
+   so a card that stays in flow inherits a 55 px-wide, overflow-hidden column. The
+   scrim is therefore fixed to the viewport; the shell sets no transform, filter
+   or contain on any ancestor, so nothing re-anchors it. Mask colour, blur and
+   z-index mirror the Modal layer of the shell so this reads as first-party. */
+.ofm_scrim{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;background:var(--dsw-alias-bg-mask-1, rgb(0 0 0 / 24%));backdrop-filter:var(--dsw-mask-blur, blur(2px))}
+.ofm_ann{width:min(620px,92vw);max-height:min(86vh,640px);border-radius:18px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);box-shadow:0 24px 70px rgb(0 0 0 / 34%);overflow:hidden;display:flex;flex-direction:column}
 .ofm_annhead{padding:18px 22px 12px;display:flex;flex-direction:column;gap:8px;background:linear-gradient(150deg,var(--dsw-alias-bg-layer-3),transparent)}
 .ofm_anntitle{margin:0;font-size:18px;font-weight:700;letter-spacing:-.3px}
 .ofm_annsub{margin:0;font-size:12px;color:var(--dsw-alias-label-tertiary)}
@@ -802,26 +810,37 @@ window.__ModuleLoader__.load({
     function Announcement(props) {
       const { t, complete, openSection, page, setPage, summary, acknowledged } = props
       useEffect(() => { if (acknowledged) complete() }, [acknowledged, complete])
+      // Same contract as the onboarding modal of the shell: the app behind the
+      // dialog goes inert, and whatever had focus inside it returns there.
+      useEffect(() => {
+        if (acknowledged) return undefined
+        const root = document.getElementById('root')
+        if (root === null) return undefined
+        const previous = root.inert
+        root.inert = true
+        return () => { root.inert = previous }
+      }, [acknowledged])
       if (acknowledged) return null
       const last = page === PAGES.length - 1
       const finish = async () => {
         try { await post(`/announcement/ack?version=${encodeURIComponent(summary?.announcementVersion ?? '')}`) } catch { /* ack is best effort */ }
         complete()
       }
-      return h('div', { className: 'ofm_ann', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('title') },
-        h('div', { className: 'ofm_annhead' },
-          h('h2', { className: 'ofm_anntitle' }, t('title')),
-          h('p', { className: 'ofm_annsub' }, t(PAGES[page]))),
-        h('div', { className: 'ofm_steps', 'aria-hidden': 'true' },
-          PAGES.map((key, index) => h('span', { key, className: 'ofm_step', 'data-on': index <= page ? 'true' : 'false' }))),
-        h('div', { className: 'ofm_annbody' }, h(PageBody, { page, t, summary })),
-        h('div', { className: 'ofm_annfoot' },
-          h('span', { className: 'ofm_note' }, t('ann.page').replace('{n}', page + 1).replace('{total}', PAGES.length)),
-          h('span', { className: 'spacer' }),
-          page === 0 ? h(Button, { kind: 'ghost', onClick: finish }, t('ann.later')) : h(Button, { kind: 'ghost', onClick: () => setPage(p => p - 1) }, '‹'),
-          last
-            ? h(Button, { kind: 'primary', onClick: async () => { await finish(); openSection?.('our-free-model') } }, t('ann.openSettings'))
-            : h(Button, { kind: 'primary', onClick: () => setPage(p => p + 1) }, '›')))
+      return h('div', { className: 'ofm_scrim' },
+        h('div', { className: 'ofm_ann', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('title') },
+          h('div', { className: 'ofm_annhead' },
+            h('h2', { className: 'ofm_anntitle' }, t('title')),
+            h('p', { className: 'ofm_annsub' }, t(PAGES[page]))),
+          h('div', { className: 'ofm_steps', 'aria-hidden': 'true' },
+            PAGES.map((key, index) => h('span', { key, className: 'ofm_step', 'data-on': index <= page ? 'true' : 'false' }))),
+          h('div', { className: 'ofm_annbody' }, h(PageBody, { page, t, summary })),
+          h('div', { className: 'ofm_annfoot' },
+            h('span', { className: 'ofm_note' }, t('ann.page').replace('{n}', page + 1).replace('{total}', PAGES.length)),
+            h('span', { className: 'spacer' }),
+            page === 0 ? h(Button, { kind: 'ghost', onClick: finish }, t('ann.later')) : h(Button, { kind: 'ghost', onClick: () => setPage(p => p - 1) }, '‹'),
+            last
+              ? h(Button, { kind: 'primary', onClick: async () => { await finish(); openSection?.('our-free-model') } }, t('ann.openSettings'))
+              : h(Button, { kind: 'primary', onClick: () => setPage(p => p + 1) }, '›'))))
     }
 
     const list = (t, keys) => keys.map(key => h('li', { key }, t(key)))
@@ -830,7 +849,7 @@ window.__ModuleLoader__.load({
       const { page, t, summary } = props
       if (page === 0) return h(Fragment, null,
         h('h3', null, t('ann.preamble')),
-        h('p', null, t('meta.description')),
+        h('p', null, t('ann.pitch')),
         h('ul', null, list(t, ['ann.p1', 'ann.p2', 'ann.p3'])))
       if (page === 1) {
         const rows = summary?.catalog ?? []

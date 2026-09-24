@@ -1,13 +1,13 @@
 {
-  "version": "1.1.2",
+  "version": "1.2.0",
   "base": "../",
-  "publishedAt": "2026-09-24T20:58:05.208Z",
+  "publishedAt": "2026-09-24T22:10:09.436Z",
   "notes": "",
   "files": [
     {
       "path": "client.js",
-      "size": 102483,
-      "sha256": "e811c657efbd4cf6dea734003676888abea2536904fbe146c4f04be26d1969c5"
+      "size": 102503,
+      "sha256": "3db34d80496dc7c115e9f2a95a1e9d72b894de6d8829904814da5b9ecf2f450b"
     },
     {
       "path": "cordis.patch.yml",
@@ -21,8 +21,8 @@
     },
     {
       "path": "index.js",
-      "size": 47426,
-      "sha256": "d97f381b63edbb7888017fe57d4ec6fdb726dc7d5f11ae37789027ebfce588de"
+      "size": 47802,
+      "sha256": "5523b4835ee1efa8c807c7839d92b602388d27156bb2d0f4022a5de7491b6dae"
     },
     {
       "path": "LICENSE",
@@ -42,7 +42,7 @@
     {
       "path": "package.json",
       "size": 1144,
-      "sha256": "277548faaae11b62c9183da02f47061071c6b8b6de5e1cdc5e1c2d9ed1fe6d44"
+      "sha256": "3a593c63a02d4e29bda5fcc8cf2bebe8e08f24148c4d9e4d6ed370ed9bb390f3"
     },
     {
       "path": "README_EN.md",
@@ -51,8 +51,8 @@
     },
     {
       "path": "README.md",
-      "size": 23397,
-      "sha256": "dcd40cc7d1b056477ce76a958d56144687b9329c2469b28e25a4d6be5c3947fa"
+      "size": 24508,
+      "sha256": "b67662ec38a3b1303d4b9c0c9d7d46bfdd063a2c796e7f21d220653ab2661102"
     },
     {
       "path": "src/adapter.js",
@@ -76,8 +76,8 @@
     },
     {
       "path": "src/feed.js",
-      "size": 9940,
-      "sha256": "0754a2f474300e3b52395a83134e462746164433a53963c4617526f54c0c8e03"
+      "size": 10784,
+      "sha256": "aac1955ec6d2b663a4573c97a2ac2d21333295b58ae9200dfe1e1135f5718d71"
     },
     {
       "path": "src/forward.js",
@@ -106,8 +106,8 @@
     },
     {
       "path": "src/reload.js",
-      "size": 9003,
-      "sha256": "252bce180b6bb74d4071ef8f881e0620f9d7d10544a72cef0fbaeb23cca3a877"
+      "size": 11290,
+      "sha256": "a2d9503e57c2132632b031770331c2aae8b0a3984bace19134e4ef38adcab04a"
     },
     {
       "path": "src/store.js",
@@ -126,8 +126,8 @@
     },
     {
       "path": "src/updater.js",
-      "size": 19780,
-      "sha256": "8ef5e32c0cdc6381d0cb7e7a3414d626c8d965c346f0c58bf70f6986c59e1ed1"
+      "size": 20386,
+      "sha256": "9549951474ea0a00e890562b9912d13a24a21b0fcf223aa1576b83f9fce2bd4e"
     },
     {
       "path": "src/upstream.js",

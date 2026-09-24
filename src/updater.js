@@ -30,12 +30,26 @@ import crypto from 'node:crypto'
 
 const REPO = 'zouyuxuan122/dsh-our-free-model'
 
-/** Manifest locations, in preference order. */
+/** Manifest locations, in preference order — jsDelivr first, for the same
+ *  reachability reason as the feed (see src/feed.js): raw.githubusercontent.com
+ *  is TLS-interfered on the networks this plugin most serves. */
 export const DEFAULT_MANIFEST_SOURCES = [
+  `https://cdn.jsdelivr.net/gh/${REPO}@main/feed/manifest.json`,
   `https://raw.githubusercontent.com/${REPO}/main/feed/manifest.json`,
   `https://raw.githubusercontent.com/${REPO}/master/feed/manifest.json`,
-  `https://cdn.jsdelivr.net/gh/${REPO}@main/feed/manifest.json`,
 ]
+
+/** Mirror of the feed's cache-buster: a minute-stamp keeps upgrades fresh. */
+export function bustCdnCache(url, now = Date.now()) {
+  try {
+    const parsed = new URL(url)
+    if (parsed.hostname.endsWith('.jsdelivr.net')) {
+      parsed.searchParams.set('ofm', Math.floor(now / 60_000).toString())
+      return parsed.href
+    }
+  } catch { /* malformed URL: let fetch report it */ }
+  return url
+}
 
 const MAX_MANIFEST_BYTES = 256 * 1024
 const MAX_FILE_BYTES = 4 * 1024 * 1024
@@ -142,7 +156,7 @@ export async function downloadManifest(sources, { timeoutMs = 15000, fetchImpl =
   const failures = []
   for (const source of sources) {
     try {
-      const response = await fetchImpl(source, {
+      const response = await fetchImpl(bustCdnCache(source), {
         redirect: 'error',
         headers: { accept: 'application/json' },
         signal: AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : undefined,
@@ -178,7 +192,7 @@ export async function stageRelease({ manifest, manifestUrl, stageDir, fetchImpl 
       const file = manifest.files[cursor++]
       const target = path.join(stageDir, ...file.path.split('/'))
       try {
-        const response = await fetchImpl(fileUrlOf(manifestUrl, manifest, file.path), {
+        const response = await fetchImpl(bustCdnCache(fileUrlOf(manifestUrl, manifest, file.path)), {
           redirect: 'error',
           signal: AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : undefined,
         })

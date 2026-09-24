@@ -23,12 +23,33 @@ import path from 'node:path'
 
 const REPO = 'zouyuxuan122/dsh-our-free-model'
 
-/** Feed locations, in preference order: raw GitHub beats the CDN edge cache. */
+/**
+ * Feed locations, in preference order.
+ *
+ * jsDelivr comes first because raw.githubusercontent.com is TLS-interfered on
+ * the networks this plugin most serves (measured: connection dies with an
+ * unverifiable certificate); the jsDelivr edge serves the same content and
+ * stays reachable there. A minute-resolution cache-buster is appended to
+ * jsDelivr URLs at fetch time so an owner's push is never served stale from
+ * the CDN (its default cache holds up to 12 hours).
+ */
 export const DEFAULT_FEED_SOURCES = [
+  `https://cdn.jsdelivr.net/gh/${REPO}@main/feed/announcements.json`,
   `https://raw.githubusercontent.com/${REPO}/main/feed/announcements.json`,
   `https://raw.githubusercontent.com/${REPO}/master/feed/announcements.json`,
-  `https://cdn.jsdelivr.net/gh/${REPO}@main/feed/announcements.json`,
 ]
+
+/** jsDelivr's edge caches per full URL; a minute-stamp keeps every poll fresh. */
+export function bustCdnCache(url, now = Date.now()) {
+  try {
+    const parsed = new URL(url)
+    if (parsed.hostname.endsWith('.jsdelivr.net')) {
+      parsed.searchParams.set('ofm', Math.floor(now / 60_000).toString())
+      return parsed.href
+    }
+  } catch { /* leave malformed URLs untouched; fetch will report them */ }
+  return url
+}
 
 export const LEVELS = new Set(['info', 'update', 'warn', 'urgent'])
 const MAX_FEED_BYTES = 512 * 1024
@@ -118,7 +139,7 @@ export async function fetchFeed(sources, { timeoutMs = 15000, fetchImpl = fetch 
   for (const source of sources) {
     if (typeof source !== 'string' || source === '') continue
     try {
-      const response = await fetchImpl(source, {
+      const response = await fetchImpl(bustCdnCache(source), {
         redirect: 'error',
         headers: { accept: 'application/json' },
         signal: AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : undefined,

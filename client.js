@@ -37,7 +37,7 @@ window.__ModuleLoader__.load({
         'ann.pitch': '你只需在 dsh 里装上这个插件，无需登录、注册、填 API Key 或任何其它操作，就能用上包括 Muse Spark 1.3、MiMo V2.6 在内的前沿模型——完全免费，不限量。',
         nav: 'Our Free Model',
         title: 'Our Free Model',
-        subtitle: '免密免费模型 · 实时可用性',
+        subtitle: '免密免费模型 · 实时可用性 · v1.2.0 已送达',
         refresh: '刷新清单',
         reprobe: '重新探测可用性',
         probing: '探测中…',

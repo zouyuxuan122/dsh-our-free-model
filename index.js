@@ -534,10 +534,10 @@ export function apply(ctx, config) {
     }),
     announcements: {
       view: feedView,
+      /** Persist the complete acked set the caller assembled (full-replace
+       *  semantics: the caller decides additions *and* clearings). */
       ack: ids => {
-        const current = new Set(ackedIds())
-        for (const id of ids) current.add(id)
-        settings.update({ announcementsAcked: [...current] })
+        settings.update({ announcementsAcked: [...ids] })
         settings.flush()
         return feedView()
       },
@@ -871,7 +871,10 @@ function createApiRoutes(deps) {
       if (method === 'POST' && routePath === '/announcements/ack') {
         const body = await readJson(req)
         const acked = ackedSet(deps)
-        if (body.all === true) acked.clear()
+        if (body.all === true) {
+          // "mark all read": every announcement currently in the feed.
+          for (const item of deps.announcements.view().items) acked.add(item.id)
+        }
         if (typeof body.id === 'string' && body.id !== '') acked.add(body.id)
         deps.announcements.ack(acked)
         return send(200, { ok: true, view: deps.announcements.view() })

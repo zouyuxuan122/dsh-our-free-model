@@ -78,11 +78,12 @@ window.__ModuleLoader__.load({
         'col.output': '输出',
         'speed.title': '速度',
         'speed.tps': '输出速度',
-        'speed.ttft': '首字延迟',
+        'speed.ttft': '首帧延迟',
         'speed.model': '模型',
         'speed.calls': '调用',
         'speed.failed': '失败',
         'speed.none': '暂无样本',
+        'speed.note': '输出速度只统计 {n}/{total} 次可测的调用：那些没流式送出的思考 token 不计入分子，解码窗口短到测不出的也不算。',
         'unit.tokPerSec': 'tok/s',
         'unit.ms': 'ms',
         'forward.enabled': '启用转发端口',
@@ -109,7 +110,7 @@ window.__ModuleLoader__.load({
         'pref.probedAt': '最近探测',
         'bench.run': '测一次',
         'bench.running': '测量中…',
-        'bench.result': '首字 {ttft}ms · 输出 {tps} tok/s · 推理 {reasoning} tok',
+        'bench.result': '首帧 {ttft}ms · 输出 {tps} tok/s · 推理 {reasoning} tok',
         'ann.preamble': '前言',
         'ann.models': '模型清单',
         'ann.steps': '使用步骤',
@@ -177,11 +178,12 @@ window.__ModuleLoader__.load({
         'col.output': 'output',
         'speed.title': 'Speed',
         'speed.tps': 'Output speed',
-        'speed.ttft': 'First token',
+        'speed.ttft': 'First frame',
         'speed.model': 'Model',
         'speed.calls': 'Calls',
         'speed.failed': 'Failed',
         'speed.none': 'No samples yet',
+        'speed.note': 'Output speed covers the {n}/{total} calls it could measure: tokens never streamed out are left out of the numerator, and windows too short to time are dropped.',
         'unit.tokPerSec': 'tok/s',
         'unit.ms': 'ms',
         'forward.enabled': 'Enable the forward port',
@@ -208,7 +210,7 @@ window.__ModuleLoader__.load({
         'pref.probedAt': 'Last probe',
         'bench.run': 'Run once',
         'bench.running': 'Measuring…',
-        'bench.result': 'first token {ttft}ms · {tps} tok/s · {reasoning} reasoning tokens',
+        'bench.result': 'first frame {ttft}ms · {tps} tok/s · {reasoning} reasoning tokens',
         'ann.preamble': 'Preamble',
         'ann.models': 'Model roster',
         'ann.steps': 'How to use',
@@ -370,7 +372,7 @@ window.__ModuleLoader__.load({
     }
 
     function kilo(value) {
-      const n = Number(value) || 0
+      const n = Math.round(Number(value) || 0)
       if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`
       if (n >= 1000) return `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}K`
       return String(n)
@@ -572,6 +574,16 @@ window.__ModuleLoader__.load({
       const { stats, t } = props
       const days = useMemo(() => [...stats.days].sort((a, b) => a.day.localeCompare(b.day)), [stats.days])
       const recent = [...(stats.samples ?? [])].slice(-40)
+      // The host already dropped the windows it could not measure and took out of
+      // the numerator the tokens it never streamed. Averaging per-call rates
+      // instead let one 1 ms window publish 63 000 tok/s and carry the whole card
+      // to 2 493.
+      const streamed = recent.filter(sample => sample.decodeMs > 0 && sample.tps !== null)
+      const streamMs = streamed.reduce((sum, sample) => sum + sample.decodeMs, 0)
+      const weightedTps = streamMs > 0
+        ? streamed.reduce((sum, sample) => sum + (sample.decodeTokens ?? 0), 0) / (streamMs / 1000)
+        : null
+      const latencies = recent.filter(sample => sample.ttftMs !== null && sample.ttftMs !== undefined)
       const models = stats.models ?? []
       const [mode, setMode] = useState('tokens')
       const [metric, setMetric] = useState('total')
@@ -613,15 +625,20 @@ window.__ModuleLoader__.load({
         h(TrendChart, { series: cumulative, mode, metric, color }),
         active === undefined ? null : h('p', { className: 'ofm_note' },
           active.name, ' · ', String(active.calls), ' ', t('speed.calls'),
-          ' · ', String(active.tps), ' ', t('unit.tokPerSec')))
+          active.tps === null || active.tps === undefined ? null : ' · ',
+          active.tps === null || active.tps === undefined ? null : `${active.tps} ${t('unit.tokPerSec')}`))
 
       const speed = h(Panel, { title: t('speed.title'), hint: recent.length + ' ' + t('speed.calls') },
         recent.length === 0
           ? h('p', { className: 'ofm_note' }, t('speed.none'))
-          : h('div', { className: 'ofm_row', style: { gap: 24 } },
-            sparkCell(t('speed.tps'), recent.map(s => s.tps), SEASON[0], value => Math.round(value) + ' ' + t('unit.tokPerSec'), t),
-            sparkCell(t('speed.ttft'), recent.map(s => s.ttftMs), SEASON[2], value => Math.round(value) + ' ' + t('unit.ms'), t),
-            sparkCell(t('stat.output'), recent.map(s => s.output), SEASON[1], value => kilo(value) + ' tok', t)))
+          : h(Fragment, null,
+            h('div', { className: 'ofm_row', style: { gap: 24 } },
+              sparkCell(t('speed.tps'), streamed.map(s => s.tps), SEASON[0], value => Math.round(value) + ' ' + t('unit.tokPerSec'), t, weightedTps),
+              sparkCell(t('speed.ttft'), latencies.map(s => s.ttftMs), SEASON[2], value => Math.round(value) + ' ' + t('unit.ms'), t),
+              sparkCell(t('stat.output'), recent.map(s => s.output), SEASON[1], value => kilo(value) + ' tok', t)),
+            h('p', { className: 'ofm_note' }, t('speed.note')
+              .replace('{n}', String(streamed.length))
+              .replace('{total}', String(recent.length)))))
 
       const table = models.length === 0 ? null : h(Panel, { title: t('speed.model') },
         h('table', { className: 'ofm_table' },
@@ -633,7 +650,7 @@ window.__ModuleLoader__.load({
             h('td', { title: m.model }, m.name),
             numTd(m.calls),
             numTd(m.tps),
-            numTd(Math.round(m.avgTtftMs)),
+            numTd(m.avgTtftMs === null || m.avgTtftMs === undefined ? null : Math.round(m.avgTtftMs)),
             numTd(kilo(m.reasoning)),
             numTd(kilo(m.output)),
             numTd(m.failed === 0 ? '—' : m.failed))))))
@@ -641,14 +658,17 @@ window.__ModuleLoader__.load({
       return h(Fragment, null, headline, h('div', { className: 'ofm_two' }, heatmap, curve), speed, table)
     }
 
-    const sparkCell = (label, values, color, format, t) => h('div', { className: 'ofm_sec', style: { gap: 2 } },
-      h('span', { className: 'ofm_note' }, label),
-      h(Sparkline, { values, color, t }),
-      h('b', { style: { fontSize: 15 } }, values.length < 2 ? '—' : format(avg(values))))
+    const sparkCell = (label, values, color, format, t, summary) => {
+      const shown = summary !== undefined ? summary : values.length < 2 ? null : avg(values)
+      return h('div', { className: 'ofm_sec', style: { gap: 2 } },
+        h('span', { className: 'ofm_note' }, label),
+        h(Sparkline, { values, color, t }),
+        h('b', { style: { fontSize: 15 } }, shown === null ? '—' : format(shown)))
+    }
 
     const stat = (value, label) => h('div', { className: 'ofm_stat' }, h('b', null, value), h('span', null, label))
     const num = label => h('th', { className: 'ofm_num' }, label)
-    const numTd = value => h('td', { className: 'ofm_num' }, value)
+    const numTd = value => h('td', { className: 'ofm_num' }, value === null || value === undefined ? '—' : value)
     const avg = list => list.length === 0 ? 0 : list.reduce((a, b) => a + b, 0) / list.length
     const segButton = (label, on, onClick) => h('button', { type: 'button', 'aria-pressed': on ? 'true' : 'false', onClick }, label)
     const chip = (label, on, color, onClick) => h('button', { type: 'button', className: 'ofm_chip', 'aria-pressed': on ? 'true' : 'false', onClick, style: on ? { color } : undefined },
@@ -740,7 +760,7 @@ window.__ModuleLoader__.load({
         setBenches(current => ({ ...current, [model.id]: { running: true } }))
         try {
           const result = await post('/bench', { model: model.id, effort: 'deep' })
-          setBenches(current => ({ ...current, [model.id]: { running: false, result: t('bench.result').replace('{ttft}', result.ttftMs).replace('{tps}', result.tokensPerSecond).replace('{reasoning}', result.reasoningTokens) } }))
+          setBenches(current => ({ ...current, [model.id]: { running: false, result: t('bench.result').replace('{ttft}', result.ttftMs).replace('{tps}', result.tokensPerSecond ?? '—').replace('{reasoning}', result.reasoningTokens) } }))
         } catch (error) {
           setBenches(current => ({ ...current, [model.id]: { running: false, result: String(error?.message ?? error) } }))
         }

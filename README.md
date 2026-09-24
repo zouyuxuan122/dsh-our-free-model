@@ -180,6 +180,23 @@ they are recorded here because they will bite any provider plugin:
    request in that session fails. The plugin repairs pairing before sending, on all
    three wires.
 
+### Why the speed panel can say `—`
+
+An early build published 2 941 tok/s for a lane really doing ~40. The gateway was
+not at fault — a raw-read probe shows 64 frames spread over 5.6 s — but the
+numerator and the denominator described different intervals: one call billed 422
+output tokens of which 291 were reasoning that **never streamed a single frame**,
+and the window began at the first visible token anyway. Dividing the whole
+completion by the seconds the answer text took is not a decode rate.
+
+So a rate is published only over a window that can carry it: `windowTokens()`
+removes unstreamed reasoning tokens from the numerator, `decodeWindow()` rejects
+windows too short to time and rates too fast to be real, and both the panel and
+the per-model table sum tokens over sum seconds instead of averaging per-call
+ratios — one 1 ms window was enough to move a 26-call average by three orders of
+magnitude. A model whose answer lands in two frames therefore has no measurable
+output speed, and says so.
+
 ## Verification
 
 Tested on both kernels, on Windows, against the live upstream:
@@ -194,6 +211,7 @@ Tested on both kernels, on Windows, against the live upstream:
 | Vision input | Image block accepted, model describes it correctly |
 | Forward listener | `/v1/models`, streaming and non-streaming `/v1/chat/completions`, unauthenticated requests rejected `401` |
 | Announcement | Shows once, four pages, and does **not** reappear across a full app restart |
+| Speed measurement | Live probe recorded `output=802 / reasoning=675` with **zero** reasoning frames in a 189 ms window: raw division says 4 243 tok/s, the plugin reports nothing, while a streamed-reasoning call's 68 tok/s passes through unchanged |
 | UI strings | No mojibake; no upstream vendor name in any app-facing surface |
 
 Not verified, so stated plainly: **visual layout was not eyeballed in pixels.**
@@ -205,6 +223,7 @@ computed CSS rules, theme-variable usage and a responsive grid — not visually.
 
 - **Shared free quota.** The lane accounts per session; hammering it surfaces as `429`. The plugin marks the model *quota reached* rather than hiding it, and the next probe clears the state.
 - **Some upstream models are slow.** `nemotron-3.5-lightning-free` measured over 30 s to first token in one run. That is upstream latency, and the dashboard reports it rather than hiding it.
+- **Output speed is sometimes `—`.** A model that answers in one or two large frames, or whose thinking never streams, has no window worth dividing. The panel says so instead of publishing the model's thinking time as decoding speed.
 - **Capabilities are what probes can confirm.** Anything the public listing and a live probe do not evidence is left unlabelled.
 - **Source is plain JavaScript.** It has to be, to load as a local plugin. Anyone with the folder can read the gateway logic; treat that as an accepted property of this distribution form, not as something obfuscation would fix.
 - **Desktop installs need a real directory**, for the reason given in [Install](#install).
@@ -214,13 +233,15 @@ computed CSS rules, theme-variable usage and a responsive grid — not visually.
 ```bash
 node scripts/client-lint.mjs        # browser half: copy/style key coverage, bundle executes
 node scripts/retry-safety-test.mjs  # failures and retry policy are durable-log safe
+node scripts/speed-stat-test.mjs    # no call can average its way into a fake tok/s
 node scripts/host-selftest.mjs      # host half end to end against the live upstream
 ```
 
 `scripts/probes/` holds the one-off evidence scripts behind the findings report —
 capability matrix, region gate, the `reasoning_effort` no-op sampling, budget
-dialects, dangling tool calls, tool-name charset rules. Three of them exercise
-this plugin's own converters and run from the repo root
+dialects, dangling tool calls, tool-name charset rules, raw read timestamps
+(`batch-delivery`), and per-frame arrival against final usage (`decode-window`).
+Five of them exercise this plugin's own code and run from the repo root
 (`node scripts/probes/pairing-repair.mjs`); the rest reach the upstream through a
 third-party SSE client and assume that checkout's module paths, so they are
 recorded as evidence rather than offered as a test suite. None of them is wired

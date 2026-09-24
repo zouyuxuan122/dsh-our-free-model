@@ -185,7 +185,7 @@ else {
   const announce = await call('GET', '/api/our-free-model/announcement')
   console.log(`  GET  /announcement -> ${announce.status} version=${announce.json?.version === ANNOUNCEMENT_VERSION} ack=${announce.json?.acknowledged}`)
   const bench = await call('POST', '/api/our-free-model/bench', { model: target.id, effort: 'light' })
-  console.log(`  POST /bench    -> ${bench.status} ${JSON.stringify(bench.json?.ttftMs ?? bench.json?.error)}ms ttft, ${JSON.stringify(bench.json?.tokensPerSecond ?? '')} tok/s`)
+  console.log(`  POST /bench    -> ${bench.status} ${JSON.stringify(bench.json?.ttftMs ?? bench.json?.error)}ms ttft, ${bench.json?.tokensPerSecond === null ? 'no measurable rate' : JSON.stringify(bench.json?.tokensPerSecond)} tok/s`)
 }
 
 console.log('\n=== 7. forward listener (OpenAI compatible) ===')
@@ -230,4 +230,7 @@ if (turnedOn.settings?.forward?.running === true) {
 
 console.log('\n--- last logs ---')
 console.log(logs.slice(-14).join('\n'))
+// The stores coalesce writes for 800 ms; exiting now would drop the very file
+// this run is meant to leave behind for inspection.
+await new Promise(resolve => setTimeout(resolve, 1200))
 process.exit(0)

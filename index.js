@@ -18,7 +18,7 @@
 import path from 'node:path'
 import fs from 'node:fs'
 import { FreeModelAdapter, ROUTE_LABELS, ROUTE_MAIN, ROUTE_REGION } from './src/adapter.js'
-import { JsonStore, SETTINGS_INITIAL, STATS_INITIAL, DATA_DIR_NAME, pruneDays, recordUsage, resolveDshHome } from './src/store.js'
+import { JsonStore, SETTINGS_INITIAL, STATS_INITIAL, STATS_VERSION, DATA_DIR_NAME, MIN_DECODE_MS, decodeWindow, migrateStats, pruneDays, recordUsage, resolveDshHome } from './src/store.js'
 import { buildCatalog, parseListing, parseRouterCapabilities, parseRouterRegistry, UPSTREAM_MODELS_URL } from './src/catalog.js'
 import { STATE, detectEgress, fetchUpstreamIds, probeCatalog } from './src/probe.js'
 import { generateKey, startForwardServer } from './src/forward.js'
@@ -26,6 +26,7 @@ import { CODE, UpstreamError } from './src/http.js'
 import { applyFingerprint, baseModelId, endpointFor, mintRequestId, sessionForConversation, wireFor } from './src/upstream.js'
 import { budgetFor, DEFAULT_LEVEL } from './src/effort.js'
 import { toChatMessages, toToolDefs } from './src/messages.js'
+import { windowTokens } from './src/stream.js'
 
 export const name = 'our-free-model'
 
@@ -41,9 +42,6 @@ export const inject = ['llm', 'webServer', 'timer']
 
 /** Published tables of the upstream router project, used as a capability overlay. */
 const ROUTER_RAW_BASE = 'https://raw.githubusercontent.com/decolua/9router/main/open-sse'
-
-/** Below this, a decode window cannot be reported as a token rate without lying. */
-const MIN_MEASURABLE_DECODE_MS = 250
 
 /** Static fallback catalog, so a cold start with no network still lists models. */
 const FALLBACK_CATALOG = buildCatalog([
@@ -85,6 +83,8 @@ export function apply(ctx, config) {
   const stats = new JsonStore(path.join(dataDir, 'stats.json'), STATS_INITIAL)
   const availability = new JsonStore(path.join(dataDir, 'availability.json'), { version: 1, at: 0, egress: null, results: {} })
   const catalogStore = new JsonStore(path.join(dataDir, 'catalog.json'), { version: 1, at: 0, entries: FALLBACK_CATALOG.map(entry => entry.id) })
+
+  if (stats.get().version !== STATS_VERSION) stats.edit(migrateStats)
 
   let catalog = materializeCatalog(catalogStore.get().entries ?? [])
   let attributionUserAgent = 'deepseek-harness'
@@ -349,7 +349,8 @@ export function apply(ctx, config) {
       const entry = catalog.find(candidate => candidate.id === id)
       if (entry === undefined) throw new UpstreamError(`unknown model "${id}"`, CODE.server)
       const started = Date.now()
-      let firstToken
+      let firstFrame
+      let sawReasoning = false
       let text = ''
       let usage
       for await (const chunk of adapter.stream({
@@ -359,9 +360,10 @@ export function apply(ctx, config) {
         reasoningEffort: effort === undefined || effort === '' ? DEFAULT_LEVEL : effort,
         sessionId: `bench:${entry.id}:${effort ?? DEFAULT_LEVEL}`,
       }, entry, state())) {
-        if (chunk.type === 'text-delta') {
-          if (firstToken === undefined) firstToken = Date.now()
-          text += chunk.text
+        if (chunk.type === 'text-delta' || chunk.type === 'reasoning-delta' || chunk.type === 'tool-call-delta') {
+          if (firstFrame === undefined) firstFrame = Date.now()
+          if (chunk.type === 'reasoning-delta') sawReasoning = true
+          if (chunk.type === 'text-delta') text += chunk.text
         }
         if (chunk.type === 'usage') usage = chunk.usage
         if (chunk.type === 'finish' && chunk.reason.kind !== 'stop' && chunk.reason.kind !== 'tool-calls') {
@@ -369,16 +371,16 @@ export function apply(ctx, config) {
         }
       }
       const ms = Date.now() - started
-      // A two-token answer decodes in a few milliseconds; dividing by that yields an
-      // absurd rate. Below a measurable window the sample is reported as total latency instead.
-      const decodeMs = firstToken === undefined ? ms : Math.max(ms - firstToken, MIN_MEASURABLE_DECODE_MS)
+      // Same rule as the recorded calls: the rate divides only by a window that
+      // actually covers the tokens in its numerator.
+      const measured = decodeWindow(firstFrame === undefined ? 0 : ms - firstFrame, windowTokens(usage, sawReasoning), true)
       return {
         model: entry.id, effort: effort ?? DEFAULT_LEVEL, ok: true,
         totalMs: ms,
-        ttftMs: firstToken === undefined ? ms : firstToken - started,
+        ttftMs: firstFrame === undefined ? ms : firstFrame - started,
         outputTokens: usage?.outputTokens ?? 0,
         reasoningTokens: usage?.reasoningTokens ?? 0,
-        tokensPerSecond: Number(((usage?.outputTokens ?? 0) / decodeMs * 1000).toFixed(1)),
+        tokensPerSecond: measured.tps,
         sample: text.slice(0, 60),
       }
     },
@@ -701,7 +703,7 @@ function buildSummary(deps) {
   }
 }
 
-function buildStats(stats, catalog) {
+export function buildStats(stats, catalog) {
   const days = stats.days ?? {}
   const series = Object.keys(days).sort().map(day => ({
     day,
@@ -710,7 +712,10 @@ function buildStats(stats, catalog) {
   }))
   const totals = {}
   for (const entry of series) for (const row of entry.models) {
-    const previous = totals[row.model] ?? { model: row.model, input: 0, output: 0, reasoning: 0, calls: 0, failed: 0, ttftMs: 0, decodeMs: 0, decodeTokens: 0 }
+    const previous = totals[row.model] ?? {
+      model: row.model, input: 0, output: 0, reasoning: 0, calls: 0, failed: 0,
+      ttftMs: 0, ttftSamples: 0, decodeMs: 0, decodeTokens: 0,
+    }
     totals[row.model] = {
       ...previous,
       input: previous.input + row.input,
@@ -718,16 +723,18 @@ function buildStats(stats, catalog) {
       reasoning: previous.reasoning + row.reasoning,
       calls: previous.calls + row.calls,
       failed: previous.failed + row.failed,
-      ttftMs: previous.ttftMs + row.ttftMs,
-      decodeMs: previous.decodeMs + row.decodeMs,
-      decodeTokens: previous.decodeTokens + row.decodeTokens,
+      ttftMs: previous.ttftMs + (row.ttftMs ?? 0),
+      ttftSamples: previous.ttftSamples + (row.ttftSamples ?? 0),
+      decodeMs: previous.decodeMs + (row.decodeMs ?? 0),
+      decodeTokens: previous.decodeTokens + (row.decodeTokens ?? 0),
     }
   }
   const named = Object.values(totals).map(row => ({
     ...row,
     name: catalog.find(entry => entry.id === row.model)?.name ?? row.model,
-    tps: row.decodeMs > 0 ? Math.round(row.decodeTokens / (row.decodeMs / 1000)) : 0,
-    avgTtftMs: row.calls > 0 ? Math.round(row.ttftMs / row.calls) : 0,
+    // A rate over too few measurable calls is a rounding error with a unit on it.
+    tps: row.decodeMs >= MIN_DECODE_MS ? Math.round(row.decodeTokens / (row.decodeMs / 1000)) : null,
+    avgTtftMs: row.ttftSamples > 0 ? Math.round(row.ttftMs / row.ttftSamples) : null,
   }))
   return {
     requests: stats.requests ?? 0,

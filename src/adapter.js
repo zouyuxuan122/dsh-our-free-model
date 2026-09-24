@@ -20,7 +20,7 @@
 import { applyFingerprint, baseModelId, endpointFor, mintRequestId, sessionForConversation, wireFor } from './upstream.js'
 import { toChatMessages, toClaudeMessages, toResponseInput, toToolDefs, repairToolPairing } from './messages.js'
 import { CODE, UpstreamError, postStreamed } from './http.js'
-import { finishReason, readStream } from './stream.js'
+import { finishReason, readStream, windowTokens } from './stream.js'
 import { DEFAULT_LEVEL, LEVELS, budgetFor } from './effort.js'
 import { createChannel } from './channel.js'
 
@@ -179,7 +179,7 @@ export class FreeModelAdapter {
     // Rejections are surfaced through the channel; silence the host's guard.
     request.catch(() => {})
 
-    const record = (ok, usage, ttftMs, decodeMs) => {
+    const record = (ok, usage, ttftMs, decodeMs, sawReasoning) => {
       this.deps.recordUsage({
         at: started,
         model: entry.id,
@@ -189,6 +189,7 @@ export class FreeModelAdapter {
         output: usage?.outputTokens ?? 0,
         reasoning: usage?.reasoningTokens ?? 0,
         cacheRead: usage?.cacheReadTokens ?? 0,
+        decodeTokens: ok ? windowTokens(usage, sawReasoning === true) : 0,
         ttftMs,
         decodeMs,
         origin: 'harness',
@@ -200,10 +201,13 @@ export class FreeModelAdapter {
       const outcome = yield* readStream(channel.read(), wire, renameMap, () => Date.now())
       yield { type: 'usage', usage: outcome.usage }
       yield { type: 'finish', reason: finishReason(outcome.finish) }
-      record(true, outcome.usage, (outcome.firstDeltaAt ?? started) - started, Date.now() - (outcome.firstDeltaAt ?? started))
+      record(true, outcome.usage, (outcome.firstDeltaAt ?? started) - started, Date.now() - (outcome.firstDeltaAt ?? started), outcome.sawReasoning)
       if (warnings.length > 0) this.deps.warn?.(`our-free-model: dropped unsupported content for ${entry.id}: ${warnings.join(', ')}`)
     } catch (error) {
-      record(false, undefined, Date.now() - started, 0)
+      // No first-token time exists for a call that never streamed, and its wall
+      // clock is not one: recording it as TTFT pushed failure latency into the
+      // latency average.
+      record(false, undefined, undefined, 0)
       // Geography refusals are how a changed egress announces itself mid-turn.
       if (error?.code === CODE.region) this.deps.onRegionBlocked?.(entry.id)
       const failure = toFailure(error)

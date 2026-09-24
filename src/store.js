@@ -29,6 +29,9 @@ export function resolveDshHome() {
 
 export const DATA_DIR_NAME = 'our-free-model'
 
+/** Bumped when the shape or the meaning of a stored field changes. */
+export const STATS_VERSION = 2
+
 export class JsonStore {
   /**
    * @param {string} file - absolute path
@@ -132,7 +135,38 @@ export const SETTINGS_INITIAL = {
   routerSyncedAt: 0,
 }
 
-export const STATS_INITIAL = { version: 1, days: {}, models: {}, requests: 0, samples: [] }
+export const STATS_INITIAL = { version: STATS_VERSION, days: {}, models: {}, requests: 0, samples: [] }
+
+/**
+ * Two bounds on what counts as a measurable decode window.
+ *
+ * A real recorded sample published 63 000 tok/s: 63 output tokens inside a 1 ms
+ * window that opened after a 2 977 ms first-token wait. `windowTokens` in
+ * src/stream.js removes the unstreamed-reasoning inflation, and these two catch
+ * the rest — a window too short to time at all, and one so fast that the frames
+ * must have been coalesced rather than decoded. Measured sustained output on
+ * this lane runs at tens of tok/s, so both bounds sit far outside anything
+ * genuine, and a call tripping either is not a slow measurement: it is no
+ * measurement, and it is dropped instead of averaged in.
+ */
+export const MIN_DECODE_MS = 250
+export const MAX_CREDIBLE_TPS = 250
+
+/**
+ * Classify one completed call's decode window.
+ * @param {number} decodeMs - first observed frame to finish
+ * @param {number} tokens - output tokens attributable to that window
+ * @param {boolean} ok
+ * @returns {{measurable: boolean, decodeMs: number, tps: number|null}}
+ */
+export function decodeWindow(decodeMs, tokens, ok) {
+  const ms = Number.isFinite(decodeMs) && decodeMs > 0 ? decodeMs : 0
+  const count = Number.isFinite(tokens) ? tokens : 0
+  if (ok !== true || count <= 0 || ms < MIN_DECODE_MS) return { measurable: false, decodeMs: 0, tps: null }
+  const tps = (count / ms) * 1000
+  if (!Number.isFinite(tps) || tps > MAX_CREDIBLE_TPS) return { measurable: false, decodeMs: 0, tps: null }
+  return { measurable: true, decodeMs: ms, tps: Math.round(tps) }
+}
 
 /**
  * Accumulate one completed call into the store's day/model buckets and keep a
@@ -144,7 +178,12 @@ export function recordUsage(stats, record) {
     const days = { ...(state.days ?? {}) }
     const bucket = days[day] ?? { total: 0, models: {} }
     const perModel = { ...(bucket.models ?? {}) }
-    const previous = perModel[record.model] ?? { input: 0, output: 0, reasoning: 0, cacheRead: 0, calls: 0, failed: 0, ttftMs: 0, decodeMs: 0, decodeTokens: 0 }
+    const previous = perModel[record.model] ?? {
+      input: 0, output: 0, reasoning: 0, cacheRead: 0, calls: 0, failed: 0,
+      ttftMs: 0, ttftSamples: 0, decodeMs: 0, decodeTokens: 0,
+    }
+    const measured = decodeWindow(record.decodeMs, record.decodeTokens, record.ok)
+    const ttftMs = Number.isFinite(record.ttftMs) && record.ok === true ? record.ttftMs : undefined
     perModel[record.model] = {
       input: previous.input + record.input,
       output: previous.output + record.output,
@@ -152,9 +191,10 @@ export function recordUsage(stats, record) {
       cacheRead: previous.cacheRead + record.cacheRead,
       calls: previous.calls + 1,
       failed: previous.failed + (record.ok ? 0 : 1),
-      ttftMs: previous.ttftMs + (record.ttftMs ?? 0),
-      decodeMs: previous.decodeMs + (record.decodeMs ?? 0),
-      decodeTokens: previous.decodeTokens + (record.ok ? record.output : 0),
+      ttftMs: previous.ttftMs + (ttftMs ?? 0),
+      ttftSamples: previous.ttftSamples + (ttftMs === undefined ? 0 : 1),
+      decodeMs: previous.decodeMs + measured.decodeMs,
+      decodeTokens: previous.decodeTokens + (measured.measurable ? record.decodeTokens : 0),
     }
     days[day] = { ...bucket, models: perModel, total: bucket.total + record.input + record.output }
     const models = { ...(state.models ?? {}) }
@@ -167,13 +207,47 @@ export function recordUsage(stats, record) {
     const samples = [...(state.samples ?? []), {
       at: record.at, model: record.model, ok: record.ok === true,
       input: record.input, output: record.output,
-      ttftMs: Math.round(record.ttftMs ?? 0),
-      tps: record.decodeMs && record.output ? Math.round((record.output / record.decodeMs) * 1000) : 0,
+      ttftMs: ttftMs === undefined ? null : Math.round(ttftMs),
+      tps: measured.tps,
+      decodeMs: measured.decodeMs,
+      decodeTokens: measured.measurable ? record.decodeTokens : 0,
       effort: record.effort ?? '',
       origin: record.origin ?? 'chat',
     }].slice(-400)
     return { ...state, days, models, requests: (state.requests ?? 0) + 1, samples }
   })
+}
+
+/**
+ * v1 added every decode window it was handed to the same accumulator, so its
+ * speed totals are garbage rather than history and cannot be un-polluted row by
+ * row. Token totals and the heatmap survive; the derived speed totals reset and
+ * repopulate from fresh calls. Per-sample first-token latency is real for
+ * completed calls, so those samples keep it — v1 stored a failed call's whole
+ * latency there, which is not a time-to-first-token.
+ */
+export function migrateStats(value) {
+  if (value?.version === STATS_VERSION) return value
+  const days = {}
+  for (const [day, bucket] of Object.entries(value?.days ?? {})) {
+    const models = {}
+    for (const [model, row] of Object.entries(bucket.models ?? {})) {
+      models[model] = { ...row, decodeMs: 0, decodeTokens: 0, ttftMs: 0, ttftSamples: 0 }
+    }
+    days[day] = { ...bucket, models }
+  }
+  return {
+    ...value,
+    version: STATS_VERSION,
+    days,
+    samples: (value?.samples ?? []).map(sample => ({
+      ...sample,
+      tps: null,
+      decodeMs: 0,
+      decodeTokens: 0,
+      ttftMs: sample.ok === true && Number.isFinite(sample.ttftMs) ? sample.ttftMs : null,
+    })),
+  }
 }
 
 /** Trim day buckets older than `keepDays`, keeping the payload chart-sized. */

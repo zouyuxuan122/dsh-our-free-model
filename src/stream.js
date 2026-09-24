@@ -24,6 +24,7 @@ class BlockSink {
     /** @type {Map<string, {index:number, kind:string, text:string, id?:string, name?:string, args?:string}>} */
     this.open = new Map()
     this.usage = undefined
+    this.sawReasoning = false
   }
 
   /** Open (or fetch) the block a given stream slot maps to. */
@@ -45,6 +46,7 @@ class BlockSink {
 
   reasoning(key, delta) {
     if (delta === undefined || delta === null || delta === '') return
+    this.sawReasoning = true
     const block = this.slot(key, 'reasoning')
     block.text += delta
     this.emit({ type: 'reasoning-delta', index: block.index, text: delta })
@@ -210,6 +212,23 @@ export function finishReason(token) {
 }
 
 /**
+ * Output tokens that can honestly be divided by the measured window.
+ *
+ * Some models on this lane are billed for reasoning they never stream: measured
+ * live, one call reported 422 output tokens of which 291 were reasoning, while
+ * zero reasoning frames arrived. Those 291 were produced before the first frame
+ * the window starts at, so counting them attributes a whole thinking phase to
+ * the seconds the answer text took and published 349 tok/s for a 108 tok/s
+ * answer. When reasoning did stream, the window covers it and the full count is
+ * the right numerator.
+ */
+export function windowTokens(usage, sawReasoning) {
+  const output = number(usage?.outputTokens) ?? 0
+  if (sawReasoning) return output
+  return Math.max(0, output - (number(usage?.reasoningTokens) ?? 0))
+}
+
+/**
  * Read one streamed response, yielding harness chunks as they are produced.
  *
  * Chunk emission stays synchronous inside the parsing of one payload, and the
@@ -221,12 +240,12 @@ export function finishReason(token) {
  * @param {Map<string, string>} renameMap - fingerprint spelling -> caller spelling
  * @param {() => number} [now] - clock stamping the first delivered delta
  * @yields {object} harness StreamChunk
- * @returns {Promise<{ usage: object, finish?: string, sawToolCall: boolean, firstDeltaAt?: number }>}
+ * @returns {Promise<{ usage: object, finish?: string, sawToolCall: boolean, sawReasoning: boolean, firstDeltaAt?: number }>}
  */
 export async function * readStream(lines, wire, renameMap, now = () => Date.now()) {
   const outbox = []
   const sink = new BlockSink(chunk => outbox.push(chunk))
-  const state = { usage: undefined, finish: undefined, sawToolCall: false, firstDeltaAt: undefined }
+  const state = { usage: undefined, finish: undefined, sawToolCall: false, firstDeltaAt: undefined, sawReasoning: false }
 
   const onFinish = (usage, kind, token) => {
     if (kind === 'usage' && usage !== undefined) state.usage = usage
@@ -250,6 +269,7 @@ export async function * readStream(lines, wire, renameMap, now = () => Date.now(
     if (wire === 'chat') feedChat(sink, payload, renameMap, onFinish)
     else if (wire === 'messages') feedClaude(sink, payload, onFinish, renameMap)
     else feedResponses(sink, payload, onFinish, renameMap)
+    if (sink.sawReasoning) state.sawReasoning = true
     for (const block of sink.open.values()) if (block.kind === 'tool-call') state.sawToolCall = true
     while (outbox.length > 0) yield outbox.shift()
   }
@@ -264,6 +284,10 @@ function carriesDelta(payload, wire) {
     const delta = choice.delta ?? {}
     return (typeof delta.content === 'string' && delta.content !== '')
       || (typeof delta.reasoning === 'string' && delta.reasoning !== '')
+      // feedChat consumes this shape, so the window has to start here too; missing
+      // it made the first observed frame the first *visible* one, which on a
+      // reasoning-heavy model is minutes after decoding began.
+      || (Array.isArray(delta.reasoning_details) && delta.reasoning_details.some(part => typeof part?.text === 'string' && part.text !== ''))
       || (delta.tool_calls ?? []).length > 0
   })
   if (wire === 'responses') return (typeof payload.delta === 'string' && payload.delta !== '') || payload.type === 'response.output_item.added'

@@ -149,3 +149,21 @@ max_tokens = 64     reasoning ≈ 63
   上游实测见 `scripts/probes/dangling-tool-call.mjs`（配对成功、悬空被拒）。
   本插件在 `src/messages.js` 的 `repairToolPairing()` 里丢掉未应答的调用与无主的应答，
   三种线协议共用这一处修复。
+
+## 11. token 计数与流式帧不对齐：吞吐面板说谎的原因不是网关
+
+- **先被证伪的是"网关批量下发"这个猜测。** `scripts/probes/batch-delivery.mjs` 绕过本插件，
+  直接对 `fetch` 的 `reader.read()` 打时间戳：space-bunny 一次调用 64 个网络读、7621 字节、
+  跨 5583 ms，最大单读 384 字节；mimo 213 读跨 5634 ms。**增量投递，插件的读流实现没问题。**
+- **真因是分子分母量的不是同一段时间。** `scripts/probes/decode-window.mjs` 打印每一帧的到达时刻
+  与最终 usage：space-bunny 一次调用 `output=422 / reasoning=291`，而 reasoning 帧数为 **0**
+  ——那 291 个 token 在第一个可见帧之前就已经生成完了，可窗口的起点正是第一个可见帧。
+  用整段 completion 去除以"答案文本落地的 1.2 秒"，就是 349 tok/s。另一条已落库的真实样本更极端：
+  63 token / 1 ms 窗口 = 63 000 tok/s，而它把 26 次调用的均值从 ~40 抬到 2 493。
+- 顺带发现同类错误：`delta.reasoning_details`（数组形状）被 `feedChat` 消费却没被 `carriesDelta`
+  认作一帧，于是这类模型的窗口起点被推迟到第一个**可见** token。已在 `src/stream.js` 补齐。
+- 处理分三层：`windowTokens()` 在没有流出 reasoning 帧时把 reasoning token 从分子里扣掉；
+  `decodeWindow()` 再加两道可信门（窗口 < 250 ms、或隐含速率 > 250 tok/s 一律判"不可测"）；
+  聚合与面板都只对**可测窗口**求 `Σtoken / Σ秒`，不再对逐次速率取平均。
+- 代价要写明：像 space-bunny 这种"不流 reasoning、答案文本挤在一两个大帧里"的模型，
+  输出速度经常就是 `—`。这是"测不出来"的实话，不是坏按钮。

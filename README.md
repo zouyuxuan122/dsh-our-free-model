@@ -319,9 +319,9 @@ reasoning token 从分子里剔掉，`decodeWindow()` 拒掉短到没法计时�
 
 | 项目 | 方式 | 结果 |
 | --- | --- | --- |
-| 发布清单与实物一致 | 离线 `build-manifest.mjs --check` + `release-e2e.mjs` | 26 个发布文件全部一致。改动前线上 main 的 1.2.1 清单已漂移 **6 个文件**（`index.js`、`README.md`、`README_EN.md`、`src/catalog.js`、`src/store.js`、`src/upstream.js`），比 issue #1 报的 2 个更多——即提出 issue 之后又复发了一次。现已随版本重生成；`--check` 与新增的 `release-e2e.mjs`（拿真实清单+真实文件把升级完整跑一遍，含"清单谎报 1 个字节必须被拒绝"的反向对照）都进了 `npm test` 和 CI |
-| 离线套件 | `npm test`（14 个套件） | 14/14 通过；不出网、不花免费额度 |
-| 新测试真的能咬住回归 | 逐条把旧行为改回去再跑 | `computeMembership` 的未判定模型：改回旧写法 → picker 报 `Cannot read properties of undefined (reading 'state')`（2 条检查失败）；`postStreamed` 的 Content-Type 判定：改回旧写法 → sniff 7 条检查失败。恢复后各自全绿 |
+| 发布清单与实物一致 | 离线 `build-manifest.mjs --check` + `release-e2e.mjs` | 26 个发布文件全部一致。改动前线上 main 的 1.2.1 清单已漂移 **6 个文件**（`index.js`、`README.md`、`README_EN.md`、`src/catalog.js`、`src/store.js`、`src/upstream.js`），比 issue #1 报的 2 个更多——即提出 issue 之后又复发了一次。现已随版本重生成；`--check` 与新增的 `release-e2e.mjs`（拿真实清单+真实文件把升级完整跑一遍，含"清单谎报 1 个字节必须被拒绝"的反向对照）都进了 `npm test` 和 CI。本轮补上两个同源漏洞：清单现在按 **LF 归一化后的字节**计算（`.gitattributes` 是 `* text=auto eol=lf`，而 Windows 上的编辑器可以把工作区写成 CRLF 且 `git status` 不报错——这正是 issue #1 上一次的回来方式），目录也改成**递归**收集（旧的单层扫描会漏掉 `src/lib/x.js` 这类嵌套文件：npm 会装它、清单里没有它，而 `installStaged` 会把清单没点名的文件从用户机器上删掉）。两条各有一条常驻断言，后者还把 26 个文件全量转成 CRLF 再跑 `--check` |
+| 离线套件 | `npm test`（14 个套件） | 14/14 通过；不出网、不花免费额度。套件端口取自临时端口段（写死的端口被两个进程同时跑会撞车：本轮实测——先占住 tui 写死的那个端口再跑它，请求打到别人家的监听上，套件一直挂到 runner 的超时被杀、打印出来的"失败详情"是六行 `ok`），runner 对每个套件有 60 s 硬超时并把挂死原因打出来 |
+| 新测试真的能咬住回归 | 逐条把旧行为改回去再跑 | `computeMembership` 的未判定模型：改回旧写法 → picker 报 `Cannot read properties of undefined (reading 'state')`（2 条检查失败）；`postStreamed` 的 Content-Type 判定：改回旧写法 → sniff 7 条检查失败。恢复后各自全绿。本轮新增的断言另跑了一遍**变异测试**：在临时副本里把 9 处修复逐个改回去再跑对应套件，9/9 变红（逐条输出见下方"本轮复审"三行） |
 | 探测判定与选择器广播 | 真实上游 `host-selftest.mjs` | 清单 10 个模型 → 主分组 7 + `region-limited` 2，转发端口 `/v1/models` 同步 9 个；`deepseek-v4-flash-free`（`Model is unavailable`）移出下拉框并在设置页保留拒因；5xx/429/断网一律保持可达（issue #3 的判定不再误伤抖动） |
 | 未判定模型不再致命 | 离线假内核 `picker-test.mjs` | 清单新增一个模型、它的探测被测试按住时，`listModels` 与 `/summary` 都正常返回，该模型 `availability=unknown` 且照常广播 |
 | 思考档位仍然强制 | 真实上游，MiMo V2.6 Flash | `light` 现在发 4096：同一 prompt 下 2 980 tokens 正常 `stop`；改动前 `light`=2048 在同一个 prompt 上以 `length` 收尾 |
@@ -330,7 +330,10 @@ reasoning token 从分子里剔掉，`decodeWindow()` 拒掉短到没法计时�
 | 无 web server 的 composition | 离线假内核 `scripts/tui-test.mjs` | 只挂 `llm` 时 `apply()` 不抛错、注册两条路由、跑完一轮流式对话、转发端口起来并拒掉无 Key 请求；后台循环走普通 unref 定时器。看板半身停在待命状态，`webServer` 一出现就自己挂上两条路由。**真实 dsh-tui 尚未实机验证**：本机两套内核（dsh 0.1.7 源码构建、AIO 6.9.3）都不含 tui profile |
 | 插件在真实内核里真的能装 | **真实内核** `dsh` 0.1.7-rc.1 web，端口 3099 | 启动无 `did not activate`；`/api/our-free-model/summary` 200（10 个模型：6 available、2 region-blocked、1 unknown、1 unavailable）、`/events` 起来推 hello；浏览器里进 `设置 → Our Free Model` 逐项读到 10 张模型卡、`不在选择器中` 分组、`思考不可关` 与 `默认档上限 16K` 标签，控制台零报错。本轮最初版本在这一步是**失败**的：`inject` 只留 `llm` 之后读 `ctx.interval` 抛 `cannot get property "timer" without inject`，插件在所有 composition 里都不再激活 |
 | 复审自己抓到的两个新问题 | 定向复现 + 常驻断言 | ① head 嗅探阶段被 abort 时抛的是原生 `AbortError`（`code` 是数字 20），`toFailure` 认不出来会降级成 `TRANSPORT`——而 `TRANSPORT` 在可重试名单里，用户主动取消的回合有被内核重试的口子；现在三条读取路径共用 `classifyStreamFailure`，sniff 里两条 abort 断言常驻。② 提交后我又改了 `src/http.js`，清单再次漂移，被 `--check` 与新加的 `release-e2e.mjs` 当场逮住——门禁按设计起作用，但也说明**任何一次改动后都得重跑** |
-| usage 计数干净 | 离线 `retry-safety-test.mjs` | 没有 `prompt_tokens_details` 的 usage 不再把 `inputTokens` 算成 `NaN`；转发端口按 `prompt_tokens/completion_tokens` 回报，被网关拒绝的转发请求返回错误而不是空的 200 |
+| 本轮复审：请求路径上两处"丢整轮/重复计费" | 本地假网关定向复现 + 常驻断言 | ① `readHead` 要填满 4 KB 才判定形状：一条**已经说完**的短回答，只要网关不立刻关掉连接，就会在嗅探窗口里等到 deadline，然后连已经读到的帧一起被 cancel 丢掉——整轮以一个可重试的 `TIMEOUT` 收场，内核再发一次、额度再花一次（复现输出就是 `frames delivered: 0`）。现在首帧认出是流就立刻放行，顺带不再压住每轮开头那 4 KB 的 token。② 流内错误的分类写进了 `llmCode`，而 `toFailure` 只读 `code`——于是每一条流内拒绝都降级成可重试的 `TRANSPORT`（已经吐过 token 的回合被重发），中途的 `RegionError` 也永远触发不了换出口重探。现在流内错误与错误信封走同一个 `classifyFailure` |
+| 本轮复审：设置入口没做类型检查 | 离线 `picker-test.mjs` + `effort-test.mjs` | `probeIntervalMinutes:'abc'` → `Math.max(1,'abc')` 是 NaN，而 `setTimeout(fn, NaN)` 在 Node 里等价于 1 ms：一秒一整轮全量探测。`defaultMaxTokens:0`（把设置页输入框清空就会发 0）→ `min(容量, 0)`，每一轮都被裁到 512 token，而选择器照旧印着 4 K/16 K/32 K 的梯子。现在数值项在 `POST /settings` 入口和取用处各设一道，非正值一律按"没设过"回落。同一批断言还钉住转发端口**只能绑回环**（`0.0.0.0` 直接 400 并写明原因），以及 `connection` 的准入决定是**逐请求**读的（改回 apply 时一次快照 → 那条 401 断言当场变红） |
+| 本轮复审：三条"看起来在测"的套件 | 变异测试（临时副本里逐条改回旧行为） | `retry-safety-test.mjs` 的四个用例全都落在"模型不在清单上"的提前返回（传的是 `model:"our-free-model/test-model-free"`，而 `baseModelId` 只剥 label 不剥路由），一个请求都没发出去过——改成真实调用后 7 个用例逐个钉住 code／可否重试／是否触发区域重探。`tui-test.mjs` 的 unref 断言比的是两个不同总体的计数（把 120 s 循环的 `unref()` 去掉仍然全绿）→ 改为按周期逐个核对。写死在套件里的端口（tui 的 18931）与另一个进程抢同一个端口时，表现为 180 s 静默挂死、打印出来的"失败详情"是六行 `ok` → 端口取自临时端口段，runner 加 60 s 硬超时并如实说明"它挂住了" |
+| usage 计数干净 | 离线 `retry-safety-test.mjs` | 没有 `prompt_tokens_details` 的 usage 不再把 `inputTokens` 算成 `NaN`；转发端口按 `prompt_tokens/completion_tokens` 回报，被网关拒绝的转发请求返回错误而不是空的 200。Messages 线上 `message_delta` 只带 output 一侧，旧写法把整条 usage 记录覆盖掉、每个 Claude 回合的 prompt tokens 记成 0；现在按字段合并 |
 
 ### 上一轮：v1.1.2（公告、升级、热重载与信任围栏）
 
@@ -411,9 +414,9 @@ node scripts/build-manifest.mjs     # 发布：重新生成 feed/manifest.json�
 ## 安全与隐私
 
 - 所有状态写在 `DSH_HOME/our-free-model/`；用量与设置只落本地，不上传任何地方。
-- 转发监听默认 `127.0.0.1`，无 Key 请求一律拒绝。改监听地址是一个显式动作。
-- 转发 Key 由 `crypto` 运行时生成、用 `timingSafeEqual` 比对、存在 `0600` 文件里。本仓库不含任何硬编码凭据。
-- 插件的 HTTP 路由带**请求信任围栏**（v1.1 起修复）：插件的 `/api/our-free-model` 前缀在 webServer 的最长前缀分发下优先于内核 `/api`，曾绕过内核鉴权。现在每个请求先走 composition 的 `connection` 服务准入（与内核 `/api` 完全同级的 cookie/token 校验）；connection 缺席的 composition 退回结构化围栏——loopback Host、拒绝跨站 `sec-fetch-site`、`Origin`/`Referer` 必须与 Host 同源同端口。实测：异源 Host/Origin 403，无 cookie 回环请求 401。
+- 转发监听**只绑回环地址**，默认 `127.0.0.1`，无 Key 请求一律拒绝。把地址改成可路由接口会被直接拒绝（`POST /settings` 回 400 并写明原因；没有 web server 的 composition 里手工写进 `settings.json` 也一样不起监听）——这一格流量花的是本机这条免密车道，不该由一个字符串决定要不要给整个子网用。
+- 转发 Key 由 `crypto` 运行时生成、用 `timingSafeEqual` 比对、存在 `0600` 文件里。本仓库不含任何硬编码凭据。`/` 与 `/health` 是存活探针，先于 Key 检查应答，但只回答"在不在"，模型清单要 Key。
+- 插件的 HTTP 路由带**请求信任围栏**（v1.1 起修复）：插件的 `/api/our-free-model` 前缀在 webServer 的最长前缀分发下优先于内核 `/api`，曾绕过内核鉴权。现在每个请求先走 composition 的 `connection` 服务准入（与内核 `/api` 完全同级的 cookie/token 校验）；connection 缺席的 composition 退回结构化围栏——loopback Host、拒绝跨站 `sec-fetch-site`、`Origin`/`Referer` 必须与 Host 同源同端口，**Host 缺失或为空也拒**（fail closed，不退回 socket 本地地址）。实测：异源 Host/Origin 403，无 cookie 回环请求 401。`connection` 是逐请求取的，因为浏览器半身要到插件加载之后才把它 provide 出来——快照式地在 apply 时读一次，围栏会整轮进程退化成结构化那一层（本轮把这条读取改回快照，picker-test 的 401 断言当场变红）。
 - **公告 HTML 在客户端经严格白名单渲染**：`scripts/sanitize-test.mjs` 用 XSS 语料（脚本注入、事件属性、`javascript:`/`data:` URL、iframe/svg/form、样式注入、畸形标签）验证全部丢弃；不经过任何 `innerHTML` sink。公告源的 `feedUrl` 可被用户改指向任意 URL，因此渲染器按不可信输入对待。
 - **应用内升级的完整性链**：清单校验（semver、路径逃逸、哈希格式）→ 下载逐文件 SHA-256 + 字节数 → staging 回读校验 → 安装后回读校验 → 任一步失败恢复备份；安装前强制重新拉取清单，杜绝陈旧清单。升级信任根是插件仓库本身（与安装插件更新相同），文件与代码边界见[已知边界](#已知边界)。
 - 卸载只需移除 bundle 条目，插件不留任何补丁；它的数据目录是纯 JSON，可直接删除。

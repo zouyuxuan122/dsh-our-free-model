@@ -100,6 +100,12 @@ export function sniffBody(text) {
 /**
  * Take the first `limit` bytes of a body without losing the rest of it.
  *
+ * Stops as soon as the head has said it is a stream: a short answer whose server
+ * keeps the connection open would otherwise sit here until the deadline, and the
+ * cancel on the way out discards everything already read — a complete turn,
+ * reported as a retryable timeout. Frames arrive as they are read, so the first
+ * token is not held back for the rest of the sniff window either.
+ *
  * @param {ReadableStream} stream
  * @param {number} limit
  * @param {object} options
@@ -124,6 +130,7 @@ async function readHead(stream, limit, { signal, timeoutMs }) {
       chunks.push(row.value)
       size += row.value.byteLength ?? 0
       text += decoder.decode(row.value, { stream: true })
+      if (sniffBody(text) === 'sse') break
     }
   } catch (error) {
     // Abandoning the body: cancel it so the connection is not held, and do not
@@ -265,7 +272,10 @@ export async function postStreamed({ path, body, session, requestId, attribution
   try {
     response = await fetch(`${UPSTREAM_BASE}${path}`, { method: 'POST', headers, body: JSON.stringify(body), redirect: 'error', signal })
   } catch (error) {
-    if (error?.name === 'AbortError') throw new UpstreamError('request aborted', CODE.aborted)
+    // The signal's own reason is what fetch rejects with, and Node's is a
+    // `TimeoutError`/user Error rather than `AbortError` — testing the name alone
+    // reported a cancelled turn as `TRANSPORT`, which is retryable.
+    if (signal?.aborted === true || error?.name === 'AbortError') throw new UpstreamError('request aborted', CODE.aborted)
     throw new UpstreamError(`our-free-model: upstream request failed: ${error?.message ?? error}`, CODE.transport)
   }
 
@@ -364,7 +374,11 @@ export async function getJson(path, { session, requestId, attributionUserAgent, 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   timer.unref?.()
-  signal?.addEventListener('abort', () => controller.abort(), { once: true })
+  // Which of the two aborted decides the code: this call's own deadline is a
+  // retryable timeout, the caller ending the request is not a failure at all.
+  let callerAborted = false
+  const onCallerAbort = () => { callerAborted = true; controller.abort() }
+  signal?.addEventListener('abort', onCallerAbort, { once: true })
   try {
     const response = await fetch(`${UPSTREAM_BASE}${path}`, { headers, redirect: 'error', signal: controller.signal })
     const text = await response.text()
@@ -374,9 +388,11 @@ export async function getJson(path, { session, requestId, attributionUserAgent, 
     return payload
   } catch (error) {
     if (error instanceof UpstreamError) throw error
+    if (callerAborted || signal?.aborted === true) throw new UpstreamError('request aborted', CODE.aborted)
     if (error?.name === 'AbortError') throw new UpstreamError('our-free-model: upstream GET timed out', CODE.timeout)
     throw new UpstreamError(`our-free-model: upstream GET failed: ${error?.message ?? error}`, CODE.transport)
   } finally {
     clearTimeout(timer)
+    signal?.removeEventListener?.('abort', onCallerAbort)
   }
 }

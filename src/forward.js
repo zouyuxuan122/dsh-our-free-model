@@ -97,8 +97,11 @@ export async function startForwardServer({ config, complete, modelRows, log = ()
       res.end()
       return
     }
+    // Liveness only, and deliberately before the key check: a caller probing
+    // whether the port is up must not need the key to get an answer. It gets a
+    // count of nothing — the model roster is what the authenticated routes serve.
     if (path === '/' || path === '/health') {
-      json(res, 200, { ok: true, service: 'our-free-model', models: modelRows().length })
+      json(res, 200, { ok: true, service: 'our-free-model' })
       return
     }
     if (!authorized(req, settings.key)) {
@@ -211,16 +214,20 @@ async function chatCompletions(req, res, complete) {
   openStreamHeaders(res)
   sendSse(res, { id, object: 'chat.completion.chunk', created, model, choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }] })
   const seenToolStart = new Set()
+  let forwarded = false
   const outcome = await complete({ model, openAi: body }, (chunk) => {
     if (chunk.type === 'text-delta') {
+      if (chunk.text !== '') forwarded = true
       sendSse(res, { id, object: 'chat.completion.chunk', created, model, choices: [{ index: 0, delta: { content: chunk.text }, finish_reason: null }] })
       return
     }
     if (chunk.type === 'reasoning-delta') {
+      if (chunk.text !== '') forwarded = true
       sendSse(res, { id, object: 'chat.completion.chunk', created, model, choices: [{ index: 0, delta: { reasoning: chunk.text }, finish_reason: null }] })
       return
     }
     if (chunk.type === 'tool-call-delta') {
+      forwarded = true
       const first = !seenToolStart.has(chunk.index)
       if (first) seenToolStart.add(chunk.index)
       sendSse(res, {
@@ -245,6 +252,18 @@ async function chatCompletions(req, res, complete) {
       sendSse(res, { id, object: 'chat.completion.chunk', created, model, choices: [], usage: toOpenAiUsage(chunk.usage) })
     }
   })
+  if (outcome.error !== undefined) {
+    // The status line went out with the first SSE header, so 200 is already spent
+    // — but a turn the lane refused must still say so. Answering a refusal with a
+    // clean `finish_reason: stop` and no content is the empty-200 this endpoint's
+    // non-streaming branch fixed, arriving by the other door.
+    sendSse(res, { error: { message: String(outcome.error), type: 'server_error' } })
+    if (!forwarded) {
+      res.write('data: [DONE]\n\n')
+      res.end()
+      return
+    }
+  }
   sendSse(res, {
     id, object: 'chat.completion.chunk', created, model,
     choices: [{ index: 0, delta: {}, finish_reason: outcome.toolCalls?.length || seenToolStart.size > 0 ? 'tool_calls' : outcome.truncated ? 'length' : 'stop' }],

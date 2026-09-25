@@ -13,7 +13,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { chatFrames, fakeContext, stubUpstream, until } from './lib/fake-kernel.mjs'
+import { chatFrames, fakeContext, freePort, stubUpstream, until } from './lib/fake-kernel.mjs'
 
 let failures = 0
 const check = (name, actual, expected) => {
@@ -28,9 +28,15 @@ const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'ofm-tui-'))
 process.env.DSH_HOME = scratch
 fs.mkdirSync(path.join(scratch, 'our-free-model'), { recursive: true })
 // A headless user has no settings page to click, so the file the plugin owns is
-// the only way in — write the forward port on before the plugin boots.
+// the only way in — write the forward port on before the plugin boots. The port
+// is taken from the ephemeral range rather than written down here: two suites
+// running side by side used to collide on the literal, the plugin's bind failed
+// (correctly, and quietly), and this file then fetched a port a *different*
+// process owned — which answered nothing, and the suite hung until the runner
+// killed it with nothing printed to say why.
+const forwardPort = await freePort()
 fs.writeFileSync(path.join(scratch, 'our-free-model', 'settings.json'), JSON.stringify({
-  version: 1, enabled: true, forward: { enabled: true, host: '127.0.0.1', port: 18931 },
+  version: 1, enabled: true, forward: { enabled: true, host: '127.0.0.1', port: forwardPort },
 }), { mode: 0o600 })
 
 const { apply, inject } = await import('../index.js')
@@ -62,7 +68,14 @@ check('apply() survives a composition with no web server', bootError?.message ??
 const adapter = ctx.__captured.adapters[0]?.adapter
 check('the adapter still registers', typeof adapter?.listModels, 'function')
 check('the probe loop and the egress watch armed on plain timers', armed.sort((a, b) => a - b), [120_000, 900_000, 1_800_000])
-check('and every one of them is unref’d, so the plugin cannot hold the app open', unrefed.length >= armed.length, true)
+check('the probe loop and the egress watch armed on plain timers', armed.sort((a, b) => a - b), [120_000, 900_000, 1_800_000])
+// Compared by period, not by count: `armed` holds the three long loops while
+// `unrefed` also holds the 40-second and 50-millisecond one-shots, so a count
+// comparison stayed true after any one of the three stopped unref'ing itself —
+// which is the one property that decides whether the plugin can hold the app
+// open past exit.
+check('and every one of them is unref’d, so the plugin cannot hold the app open',
+  armed.filter(ms => !unrefed.includes(ms)), [])
 check('the dashboard half is the only thing left waiting', ctx.__captured.serverRoutes.length, 0)
 check('it waits for a service rather than running without one', ctx.__waiting.map(fiber => [...fiber.names]), [['webServer']])
 
@@ -94,12 +107,12 @@ for await (const chunk of adapter.stream({
 check('a turn streams', chunks.filter(chunk => chunk.type === 'text-delta').map(chunk => chunk.text).join(''), 'hello from the tui')
 check('and finishes', chunks.find(chunk => chunk.type === 'finish')?.reason, { kind: 'stop' })
 
-const forward = await fetch('http://127.0.0.1:18931/v1/models', { headers: { authorization: 'Bearer local-test-key' } })
+const forward = await fetch(`http://127.0.0.1:${forwardPort}/v1/models`, { headers: { authorization: 'Bearer local-test-key' } })
 check('the forward listener came up without a web server', forward.status, 401)
 const key = JSON.parse(fs.readFileSync(path.join(scratch, 'our-free-model', 'settings.json'), 'utf8')).forwardKey
-const rows = await (await fetch('http://127.0.0.1:18931/v1/models', { headers: { authorization: `Bearer ${key}` } })).json()
+const rows = await (await fetch(`http://127.0.0.1:${forwardPort}/v1/models`, { headers: { authorization: `Bearer ${key}` } })).json()
 check('and lists the usable models with the real key', rows.data.map(row => row.id).sort(), ['mimo-v2.6-flash-free', 'space-bunny-free'])
-const answered = await (await fetch('http://127.0.0.1:18931/v1/chat/completions', {
+const answered = await (await fetch(`http://127.0.0.1:${forwardPort}/v1/chat/completions`, {
   method: 'POST',
   headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
   body: JSON.stringify({ model: 'space-bunny-free', messages: [{ role: 'user', content: 'hi' }] }),
@@ -109,7 +122,7 @@ check('usage comes back in the OpenAI spelling the caller reads', [answered.usag
 
 // A turn the lane refuses must not arrive as an empty 200.
 stub.api.refuseAll = true
-const refused = await fetch('http://127.0.0.1:18931/v1/chat/completions', {
+const refused = await fetch(`http://127.0.0.1:${forwardPort}/v1/chat/completions`, {
   method: 'POST',
   headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
   body: JSON.stringify({ model: 'space-bunny-free', messages: [{ role: 'user', content: 'hi' }] }),
@@ -117,6 +130,20 @@ const refused = await fetch('http://127.0.0.1:18931/v1/chat/completions', {
 const refusedBody = await refused.json()
 check('a refused forward call is a failure', refused.status, 502)
 check('and says what the gateway said', /unavailable/i.test(refusedBody.error?.message ?? ''), true)
+stub.api.refuseAll = false
+
+// The same refusal on the streaming side, where the status line was already spent
+// on the SSE headers: it has to say so in the body rather than close the stream as
+// though the model had answered with an empty turn.
+stub.api.refuseAll = true
+const streamedRefusal = await fetch(`http://127.0.0.1:${forwardPort}/v1/chat/completions`, {
+  method: 'POST',
+  headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+  body: JSON.stringify({ model: 'space-bunny-free', messages: [{ role: 'user', content: 'hi' }], stream: true }),
+})
+const streamedText = await streamedRefusal.text()
+check('a refused streaming call carries an error frame', /"error"/.test(streamedText), true)
+check('and not a clean stop', /finish_reason":"stop/.test(streamedText), false)
 stub.api.refuseAll = false
 
 for (const dispose of ctx.__disposers.reverse()) dispose()

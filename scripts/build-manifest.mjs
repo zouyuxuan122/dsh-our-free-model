@@ -29,6 +29,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
+import { publishedBytes } from './lib/published-bytes.mjs'
 
 const root = path.join(fileURLToPath(new URL('..', import.meta.url)))
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
@@ -47,16 +48,23 @@ for (const rel of shipped) {
     console.error(`listed file "${rel}" does not exist; fix package.json "files"`)
     process.exit(1)
   }
-  if (stat.isDirectory()) {
-    for (const entry of fs.readdirSync(absolute, { withFileTypes: true })) {
-      if (entry.isFile()) addFile(path.join(rel, entry.name))
-    }
-  } else if (stat.isFile()) addFile(rel)
+  if (stat.isDirectory()) walkDirectory(rel)
+  else if (stat.isFile()) addFile(rel)
+}
+
+/** Every file under a listed directory, however deep. */
+function walkDirectory(dir) {
+  for (const entry of fs.readdirSync(path.join(root, dir), { withFileTypes: true })) {
+    if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue
+    const rel = path.join(dir, entry.name)
+    if (entry.isDirectory()) walkDirectory(rel)
+    else if (entry.isFile()) addFile(rel)
+  }
 }
 
 function addFile(rel) {
   const absolute = path.join(root, rel)
-  const body = fs.readFileSync(absolute)
+  const body = publishedBytes(fs.readFileSync(absolute))
   files.push({
     path: rel.replace(/\\/g, '/'),
     size: body.length,
@@ -70,7 +78,19 @@ let previous
 try { previous = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) } catch { /* first manifest */ }
 if (previous?.version !== undefined && !process.argv.includes('--force')) {
   const rank = value => String(value).split(/[.\-]/).map(part => Number.isNaN(Number(part)) ? part : Number(part))
-  if (JSON.stringify(rank(previous.version)) > JSON.stringify(rank(pkg.version)) === true) {
+  const after = (left, right) => {
+    // Compared segment by segment. The previous version of this test stringified
+    // the two arrays and compared the strings, which read 1.9.0 as newer than
+    // 1.10.0 and would have the release script refuse the day it needs it.
+    for (let index = 0; index < Math.max(left.length, right.length); index++) {
+      const a = left[index] ?? 0
+      const b = right[index] ?? 0
+      if (a === b) continue
+      return typeof a === 'number' && typeof b === 'number' ? a > b : String(a) > String(b)
+    }
+    return false
+  }
+  if (after(rank(previous.version), rank(pkg.version))) {
     console.error(`refusing to downgrade the manifest from ${previous.version} to ${pkg.version} (use --force)`)
     process.exit(1)
   }

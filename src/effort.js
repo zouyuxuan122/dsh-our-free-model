@@ -88,14 +88,23 @@ function ceilingOf(entry, model) {
  * @returns {number} tokens
  */
 export function budgetFor(level, model, requested, fallback) {
+  // A ceiling that is not a positive number is *no* ceiling. Without this, the
+  // settings page's own cleared input — `Number('') || 0` — reached the wire as
+  // `min(model capacity, 0)`, and every turn of every model silently came back
+  // clamped to `MIN_BUDGET`.
   const capacity = Math.min(
     model?.maxOutput ?? 32768,
-    requested ?? Number.POSITIVE_INFINITY,
-    fallback ?? Number.POSITIVE_INFINITY,
+    usableTokens(requested),
+    usableTokens(fallback),
   )
   const ceiling = ceilingOf(resolveLevel(level, model), model)
   if (ceiling === undefined) return Math.max(MIN_BUDGET, Math.trunc(capacity))
   return Math.max(MIN_BUDGET, Math.trunc(Math.min(ceiling, capacity)))
+}
+
+/** A caller-supplied token ceiling, or "none" when it is not a positive number. */
+function usableTokens(value) {
+  return Number.isFinite(value) && value > 0 ? value : Number.POSITIVE_INFINITY
 }
 
 /** Below this the answer itself cannot land, so no level is allowed to go. */

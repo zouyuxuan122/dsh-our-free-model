@@ -79,10 +79,13 @@ export async function stubUpstream({ listing = [], answer = () => ({ body: chatF
       // releases it when it is done looking, so no wall-clock race is involved.
       if (verdict.wait !== undefined) await verdict.wait
       if (verdict.holdMs !== undefined) {
-        // Headers now, bytes never (for a while): the shape of a gateway that
-        // accepts a request and then stalls before the first frame.
+        // Headers now, then the pieces it was given, then silence. A script that
+        // asked for both was held to one of them — the pieces were dropped on the
+        // floor, so "the answer arrived and then the connection stalled" could
+        // only ever be tested as "nothing arrived at all".
         res.writeHead(status, { 'content-type': contentType })
         res.flushHeaders?.()
+        for (const piece of verdict.pieces ?? []) res.write(piece)
         setTimeout(() => res.end(), verdict.holdMs).unref?.()
         return
       }
@@ -190,6 +193,13 @@ export function fakeContext({ inject, mounted = ['llm', 'webServer', 'timer', 'c
     __captured: captured,
     __disposers: disposers,
     __waiting: waiting,
+    /**
+     * The service table, so a suite can give one of them real behaviour.
+     * `connection.admit` answering "admitted" to everything is the difference
+     * between a fence that ran and a fence that was skipped: a test that means to
+     * check the admission decision has to be able to make it refuse.
+     */
+    __services: services,
     /** Let a service appear after load, the way `webServer` really does. */
     __mountService(name) {
       mountedSet.add(name)
@@ -230,6 +240,21 @@ export class FakeRequest {
     let index = 0
     return { next: async () => index < value.length ? { value: value[index++], done: false } : { done: true, value: undefined } }
   }
+}
+
+/**
+ * A port nobody is holding, for a test that has to name one before the plugin
+ * boots. A literal in a suite is a claim that no other process on the machine
+ * wants it, which two suites running side by side — or one leftover listener from
+ * an earlier run — promptly disprove: the plugin's bind failed, its error was
+ * caught by design, and the suite then fetched a port someone else owned.
+ */
+export async function freePort() {
+  const probe = http.createServer()
+  await new Promise(resolve => probe.listen(0, '127.0.0.1', resolve))
+  const { port } = probe.address()
+  await new Promise(resolve => probe.close(resolve))
+  return port
 }
 
 /** Drive one request through a captured handler and parse the JSON answer. */

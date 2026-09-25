@@ -21,7 +21,9 @@ import fs from 'node:fs'
 import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
+import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { publishedBytes } from './lib/published-bytes.mjs'
 import { PluginUpdater } from '../src/updater.js'
 
 const repo = fileURLToPath(new URL('..', import.meta.url))
@@ -36,6 +38,7 @@ const check = async (name, fn) => {
 }
 const assert = (cond, message) => { if (!cond) throw new Error(message) }
 const sha = body => crypto.createHash('sha256').update(body).digest('hex')
+const CRLF_MARK = Buffer.from('\r\n')
 
 /** A stand-in for the installed copy: one release behind, with a stale file. */
 function installedPackage(dir) {
@@ -65,7 +68,9 @@ const server = http.createServer((req, res) => {
     return
   }
   res.writeHead(200, { 'content-type': 'application/octet-stream' })
-  res.end(fs.readFileSync(file))
+  // What GitHub hands out is the blob, and the blob is LF: serve the same, or the
+  // test would be downloading something no user ever does.
+  res.end(publishedBytes(fs.readFileSync(file)))
 })
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
 server.unref()
@@ -90,18 +95,73 @@ await check('the manifest describes the tree it lives in', () => {
   const drifted = manifest.files.filter(row => {
     const file = path.join(repo, row.path)
     if (!fs.existsSync(file)) return true
-    const body = fs.readFileSync(file)
+    const body = publishedBytes(fs.readFileSync(file))
     return body.length !== row.size || sha(body) !== row.sha256
   })
   assert(drifted.length === 0, `drifted: ${drifted.map(row => row.path).join(', ')} — run: node scripts/build-manifest.mjs`)
 })
 
-await check('every shipped file is named by the manifest', () => {
+await check('every file the package ships is named by the manifest, however deep', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(repo, 'package.json'), 'utf8'))
+  const shipped = []
+  const walk = rel => {
+    const absolute = path.join(repo, rel)
+    const stat = fs.statSync(absolute)
+    if (stat.isDirectory()) {
+      for (const entry of fs.readdirSync(absolute, { withFileTypes: true })) {
+        if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue
+        walk(path.join(rel, entry.name))
+      }
+    } else if (stat.isFile()) shipped.push(rel.replace(/\\/g, '/'))
+  }
+  for (const rel of ['package.json', ...(pkg.files ?? [])]) walk(rel)
   const named = new Set(manifest.files.map(row => row.path))
-  // Anything the package publishes but the manifest omits would be installed
-  // unverified, which is the mirror image of the issue #1 failure.
-  const unverified = ['index.js', 'client.js', 'package.json'].filter(item => !named.has(item))
-  assert(unverified.length === 0, `not covered: ${unverified.join(', ')}`)
+  const missing = shipped.filter(item => !named.has(item))
+  // Not just "installed unverified", which is the mirror image of issue #1:
+  // `installStaged` sweeps whatever the manifest does not name out of the
+  // installed package, so one nested file the builder failed to list is deleted
+  // from every user's copy while the digest check still passes.
+  assert(missing.length === 0, `not covered: ${missing.join(', ')}`)
+})
+
+await check('a CRLF working tree describes the same release', () => {
+  // The exact shape issue #1 came back in: an editor leaves the tree CRLF, `git
+  // status` stays clean because `.gitattributes` normalises on checkin, and a
+  // manifest built from those bytes promises a longer file than the LF blob that
+  // actually downloads. The builder normalises now, so the two agree either way —
+  // which only a CRLF tree can demonstrate.
+  const copy = fs.mkdtempSync(path.join(os.tmpdir(), 'ofm-crlf-'))
+  fs.cpSync(repo, path.join(copy, 'repo'), {
+    recursive: true,
+    filter: source => !/[\\/](node_modules|\.git|\.verify)([\\/]|$)/.test(source),
+  })
+  const root = path.join(copy, 'repo')
+  const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
+  const targets = []
+  const collect = rel => {
+    const absolute = path.join(root, rel)
+    if (fs.statSync(absolute).isDirectory()) {
+      for (const entry of fs.readdirSync(absolute, { withFileTypes: true })) {
+        if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue
+        collect(path.join(rel, entry.name))
+      }
+    } else targets.push(absolute)
+  }
+  for (const rel of ['package.json', ...(pkg.files ?? [])]) collect(rel)
+  for (const file of targets) {
+    const body = fs.readFileSync(file)
+    if (body.includes(0)) continue
+    fs.writeFileSync(file, Buffer.from(body.toString('utf8').replace(/\r?\n/g, '\r\n'), 'utf8'))
+  }
+  const grown = targets.filter(file => {
+    const body = fs.readFileSync(file)
+    return body.includes(CRLF_MARK)
+  })
+  assert(grown.length > 3, `the fixture did not actually become CRLF (${grown.length} files)`)
+  const run = spawnSync(process.execPath, [path.join(root, 'scripts', 'build-manifest.mjs'), '--check'], { encoding: 'utf8' })
+  assert(run.status === 0, `--check failed on a CRLF tree: ${(run.stderr ?? '').trim().split('\n').slice(0, 3).join(' / ')}`)
+  fs.rmSync(copy, { recursive: true, force: true })
+  console.log(`     ${grown.length} files held at CRLF and the manifest still matched the blob`)
 })
 
 await check('an older installed copy is offered this release', async () => {

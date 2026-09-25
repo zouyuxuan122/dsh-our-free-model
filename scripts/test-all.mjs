@@ -36,16 +36,37 @@ const suites = [
   ['tui', 'tui-test.mjs', []],
 ].filter(([name]) => only === null || name.startsWith(only))
 
+if (only !== null && suites.length === 0) {
+  console.error(`--only "${only}" selected no suite`)
+  process.exit(1)
+}
+
+/**
+ * A suite that hangs is a suite that reports nothing.
+ *
+ * One of these bound a fixed port, lost the race to a suite running beside it, and
+ * then sat in a `fetch` whose socket nobody answered — three minutes of the
+ * runner's own ceiling, after which it printed six `ok` lines as the "failure
+ * detail" because a hung process emits no `FAIL` to grep. The deadline is well
+ * above the slowest suite, and the reason is printed rather than inferred.
+ */
+const SUITE_TIMEOUT_MS = 60_000
+
 const results = []
 for (const [name, script, args] of suites) {
   const started = Date.now()
-  const run = spawnSync(process.execPath, [path.join(scriptsDir, script), ...args], { encoding: 'utf8', timeout: 180_000 })
+  const run = spawnSync(process.execPath, [path.join(scriptsDir, script), ...args], { encoding: 'utf8', timeout: SUITE_TIMEOUT_MS })
+  const elapsed = Date.now() - started
   const output = `${run.stdout ?? ''}${run.stderr ?? ''}`.trimEnd().split('\n')
-  const ok = run.status === 0
-  results.push({ name, ok, ms: Date.now() - started, output })
-  const tail = output.filter(line => /^(FAIL|✗|Error|error:)/.test(line.trim())).slice(0, 6)
-  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name.padEnd(14)} ${String(Date.now() - started).padStart(5)} ms`)
-  if (!ok) for (const line of tail.length > 0 ? tail : output.slice(-6)) console.log(`       ${line}`)
+  const hung = run.error !== undefined || run.signal !== null
+  const ok = !hung && run.status === 0
+  results.push({ name, ok, ms: elapsed, output })
+  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name.padEnd(14)} ${String(elapsed).padStart(5)} ms`)
+  if (!ok) {
+    if (hung) console.log(`       ${run.error?.code === 'ETIMEDOUT' ? `killed at the ${SUITE_TIMEOUT_MS / 1000}s deadline — it hung, and printed nothing to explain itself` : `never finished (${run.error?.message ?? run.stderr ?? `signal ${run.signal}`})`}`)
+    const detail = output.filter(line => /^(FAIL|✗|Error|error:)/.test(line.trim())).slice(0, 6)
+    for (const line of (detail.length > 0 ? detail : output.slice(-12))) console.log(`       ${line}`)
+  }
 }
 
 const failed = results.filter(result => !result.ok)

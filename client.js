@@ -37,7 +37,7 @@ window.__ModuleLoader__.load({
         'ann.pitch': '你只需在 dsh 里装上这个插件，无需登录、注册、填 API Key 或任何其它操作，就能用上包括 Muse Spark 1.3、MiMo V2.6 在内的前沿模型——完全免费，不限量。',
         nav: 'Our Free Model',
         title: 'Our Free Model',
-        subtitle: '免密免费模型 · 实时可用性 · v1.2.0 已送达',
+        subtitle: '免密免费模型 · 实时可用性',
         refresh: '刷新清单',
         reprobe: '重新探测可用性',
         probing: '探测中…',
@@ -97,6 +97,7 @@ window.__ModuleLoader__.load({
         'forward.host': '监听地址',
         'forward.port': '端口',
         'forward.apply': '应用',
+        'settings.failed': '设置未保存',
         'forward.running': '正在监听',
         'forward.stopped': '未启用',
         'forward.baseUrl': 'Base URL',
@@ -264,6 +265,7 @@ window.__ModuleLoader__.load({
         'forward.host': 'Bind address',
         'forward.port': 'Port',
         'forward.apply': 'Apply',
+        'settings.failed': 'Settings not saved',
         'forward.running': 'Listening',
         'forward.stopped': 'Off',
         'forward.baseUrl': 'Base URL',
@@ -1377,7 +1379,14 @@ window.__ModuleLoader__.load({
 
       const apply = async patch => {
         setBusy(true)
-        try { await post('/settings', patch); summary.reload(); stats.reload() } finally { setBusy(false) }
+        try {
+          await post('/settings', patch)
+          summary.reload(); stats.reload()
+        } catch (error) {
+          // The route can refuse a patch — a routable forward bind, for one — and a
+          // rejection nobody shows is a button that appears to do nothing.
+          showToast({ title: t('settings.failed'), body: String(error?.message ?? error), tone: 'warn' })
+        } finally { setBusy(false) }
       }
       const bench = async model => {
         setBenches(current => ({ ...current, [model.id]: { running: true } }))

@@ -1,13 +1,13 @@
 {
   "version": "1.2.2",
   "base": "../",
-  "publishedAt": "2026-09-25T19:08:41.436Z",
+  "publishedAt": "2026-09-25T20:37:15.604Z",
   "notes": "修复：应用内升级（1.2.1 的清单与实际文件不一致，旧版本点一键升级必然在校验阶段失败）；思考关不掉的模型三档预算翻倍（4096/16384/上限），长回答不再频繁被截断；探测判定不可用的模型不再出现在模型选择器与模型探测结果里；只声明 llm 依赖，没有 web server 的 composition（dsh-tui）也能加载；转发端口按 OpenAI 字段回报 usage，被拒绝的回合不再返回空的 200。",
   "files": [
     {
       "path": "client.js",
-      "size": 105531,
-      "sha256": "f0186fc4b7ecfaf082287e3eced22aad168dd053b89eade403ee215141b59124"
+      "size": 105930,
+      "sha256": "34dad8b96de9d32d736a34f5637456f26baab7f23090035af6f8be0dd2f7acfc"
     },
     {
       "path": "cordis.patch.yml",
@@ -21,8 +21,8 @@
     },
     {
       "path": "index.js",
-      "size": 52794,
-      "sha256": "a8a613b8884d3f18182839a05876a110eb6465930e095fac51b01a7a54f77319"
+      "size": 56999,
+      "sha256": "6ada409b1005250aacbdbd2d19505399ca547bcd8bf7ef6cd6428c0f9cb0c58f"
     },
     {
       "path": "LICENSE",
@@ -46,13 +46,13 @@
     },
     {
       "path": "README_EN.md",
-      "size": 35208,
-      "sha256": "986032bdf8e14b29630f17787a3b7adbf65a78db3a66fdaf63d95c7c76fd2d73"
+      "size": 39871,
+      "sha256": "5e9f8f3018793ac25163c5c8b4f1730219231926f26dcd9accb8b543cf2e730f"
     },
     {
       "path": "README.md",
-      "size": 34697,
-      "sha256": "72f9c4f5385fe47a1371bcac6930bb96e5ca0ec0a5ba40c622f0d556f3bf5f33"
+      "size": 39209,
+      "sha256": "e322ec5cc5da43db8436fd07eb1cc43ceb7ed52fde37e6f334a328a6920170cb"
     },
     {
       "path": "src/adapter.js",
@@ -71,8 +71,8 @@
     },
     {
       "path": "src/effort.js",
-      "size": 7039,
-      "sha256": "997eec502b32a6f380aa389372a294f3491aa929dea45aa1d4dc6ebbe2aef0d0"
+      "size": 7484,
+      "sha256": "e8a80dfcc4602e78b6d85d7b7e55e1c44e90ed775d0cb175daab654831ecf70a"
     },
     {
       "path": "src/feed.js",
@@ -81,13 +81,13 @@
     },
     {
       "path": "src/forward.js",
-      "size": 11483,
-      "sha256": "b834d076846917f086b8508d30394012ef68a8d83ab2cc757c599c5cc0a4e89b"
+      "size": 12371,
+      "sha256": "0ae7cd4e0c37b7c03308dce38615b801fc7a1da38dca2edfa7ee34aa9b0ce231"
     },
     {
       "path": "src/http.js",
-      "size": 16334,
-      "sha256": "32eaeef8908ce60178ca5270cf2f9a0704ef234999bcd265de2c3dc7185d96a1"
+      "size": 17443,
+      "sha256": "b374c8e87dfc793912af6ba48bf044630c561ebb420180a382554cde67f7ff8e"
     },
     {
       "path": "src/messages.js",
@@ -111,18 +111,18 @@
     },
     {
       "path": "src/store.js",
-      "size": 11399,
-      "sha256": "324f212544405db6ee409ae34e2e1276d209d3878e950c5bbdbd2dd069261011"
+      "size": 11834,
+      "sha256": "bdd32b39f14e7135b3441f27e5017d49203d2967b7aa5651b8cae0bc000aad8e"
     },
     {
       "path": "src/stream.js",
-      "size": 14897,
-      "sha256": "64eb1e3b4aba13de32608842e769cd684c134cea63852935425d0d69b535aa98"
+      "size": 15890,
+      "sha256": "5c9cf748d98a28064aa5df2192340adafc2fdd52af9fcbd2f84fe151dc4ed661"
     },
     {
       "path": "src/trust.js",
-      "size": 3549,
-      "sha256": "15960d2849f9884ccdfed047aa609df5e5f6758738a047f5b7d6fa14afcf564a"
+      "size": 4042,
+      "sha256": "aadee43204043c18486ac8b0d9f6ffff8f4648a0499711611b061cc30e67e0af"
     },
     {
       "path": "src/updater.js",

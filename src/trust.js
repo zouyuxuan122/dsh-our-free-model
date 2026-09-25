@@ -22,6 +22,17 @@
 const LOOPBACK_NAMES = new Set(['127.0.0.1', '[::1]', '::1', 'localhost'])
 
 /**
+ * Is this address one a same-machine caller can reach — i.e. may the forward
+ * listener bind it? The lanes are keyed to this machine's egress and priced
+ * against whoever shares it, so binding a routable interface would hand the
+ * quota to the whole subnet on the strength of a string in a settings file.
+ */
+export function isLoopbackHost(value) {
+  const authority = authorityOf(String(value ?? ''), 'http')
+  return authority !== null && LOOPBACK_NAMES.has(authority.hostname)
+}
+
+/**
  * Decide one request. Returns an HTTP status to reject with, or `undefined` to
  * let the handler run.
  *

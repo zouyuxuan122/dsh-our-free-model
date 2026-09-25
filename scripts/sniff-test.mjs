@@ -153,17 +153,29 @@ check('and the JSON it belongs to still parses', straddle.payloads.length, 1)
 // Nothing at all after the request: the sniff is the one read that happens before
 // `readSse` installs its deadline, so it carries its own. Without one the turn
 // would hang here on a connection that accepts and then says nothing.
-scripts.set('mimo-v2.6-flash-free', { contentType: 'text/event-stream', holdMs: 3000 })
-const stalled = await ask('mimo-v2.6-flash-free', { timeoutMs: 250 })
+scripts.set('mimo-v2.6-flash-free', { contentType: 'text/event-stream', holdMs: 600 })
+const stalled = await ask('mimo-v2.6-flash-free', { timeoutMs: 200 })
 check('a body that never starts is a timeout, not a hang', stalled.error?.code, CODE.timeout)
 check('and it says so', /no bytes/.test(stalled.error?.message ?? ''), true)
+
+// A whole answer, then a connection that stays open. The sniff used to fill its
+// 4 096-byte window before deciding anything, so a short turn that the gateway
+// had already finished typing sat in the head until the deadline — and the cancel
+// on the way out threw the frames away with it: a completed turn, reported as a
+// retryable timeout, re-sent and paid for twice. Now the body is allowed to
+// declare itself a stream as soon as it has.
+const shortAnswer = chatFrames('short and finished')
+scripts.set('mimo-v2.5-free', { contentType: 'text/event-stream', holdMs: 600, pieces: [shortAnswer] })
+const held = await ask('mimo-v2.5-free', { timeoutMs: 200 })
+check('a complete answer behind a held connection arrives', framesOf(held.payloads), 'short and finished')
+check('instead of timing out with the turn in hand', held.error?.code ?? 'none', 'none')
 
 // ── aborting a stream that was already sniffed ───────────────────────────────
 // The replayed head means the reader is owned by a generator rather than by the
 // response directly, so cancellation has to reach through both layers.
 scripts.set('jev-1.13-free', {
   contentType: 'application/json',
-  holdMs: 4000,
+  holdMs: 400,
   // `chatFrames` already spells the frame separators, so the fixture borrows it.
   pieces: [chatFrames('first').split('data: [DONE]')[0]],
 })
@@ -178,8 +190,11 @@ const abortedEarly = await new Promise(resolve => {
     onData: () => { seenBeforeAbort++ },
   }).then(() => resolve('resolved')).catch(error => resolve(error?.code ?? 'uncoded'))
 })
-check('a stream aborted during the sniff reads as aborted, not as transport', abortedEarly, CODE.aborted)
-check('and nothing was handed over while the head was still being sniffed', seenBeforeAbort, 0)
+check('a stream aborted mid-delivery reads as aborted, not as transport', abortedEarly, CODE.aborted)
+// The head is sniffed from the first frame now, so this abort lands *during*
+// delivery rather than before it — which is the case that matters, because the
+// caller has already been handed text. Nothing is unwound by the cancellation.
+check('and what it had already delivered stays delivered', seenBeforeAbort > 0, true)
 
 // The same cancellation one moment later, once the head is past the sniff window
 // and `readSse` owns the reader instead of `readHead`: two different layers, and
@@ -188,7 +203,7 @@ check('and nothing was handed over while the head was still being sniffed', seen
 const manyFrames = Array.from({ length: 120 }, (_, index) => `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: `t${index}` } }] })}
 
 `).join('')
-scripts.set('union-alpha', { contentType: 'text/event-stream', holdMs: 4000, pieces: [manyFrames] })
+scripts.set('union-alpha', { contentType: 'text/event-stream', holdMs: 400, pieces: [manyFrames] })
 const controller2 = new AbortController()
 let delivered = 0
 const abortedMid = await new Promise(resolve => {

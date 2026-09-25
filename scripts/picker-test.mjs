@@ -16,7 +16,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { chatFrames, callRoute, fakeContext, stubUpstream, until } from './lib/fake-kernel.mjs'
+import { chatFrames, callRoute, fakeContext, freePort, stubUpstream, until } from './lib/fake-kernel.mjs'
 
 let failures = 0
 const check = (name, actual, expected) => {
@@ -32,7 +32,9 @@ const LISTING = [
 ]
 
 /** One answer per model, standing in for what the lane really does. */
+let holdProbe = null
 function verdict(id) {
+  if (holdProbe !== null && id === holdProbe.model) return { wait: holdProbe.promise, body: chatFrames() }
   if (id === 'deepseek-v4-flash-free') {
     return { status: 400, body: JSON.stringify({ error: { type: 'ModelError', message: 'Model is unavailable.' } }) }
   }
@@ -58,10 +60,17 @@ const stub = await stubUpstream({ listing: LISTING, answer: verdict })
 process.env.OUR_FREE_MODEL_BASE = stub.base
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'ofm-picker-'))
 process.env.DSH_HOME = scratch
+// Named before the plugin boots, and taken from the ephemeral range: a literal
+// here is a bet that no other suite on the machine wants the same port.
+const forwardPort = await freePort()
 
 const { apply, inject } = await import('../index.js')
 const routes = []
-const ctx = fakeContext({ inject, onRegister: route => routes.push(route) })
+// `connection` is deliberately absent at load: the real browser half publishes it
+// after plugins start, and the fence has to notice. With it mounted from the
+// beginning the fake's always-admit `admit` answered every request, which made
+// "the fence ran" and "the fence was skipped" print the same thing.
+const ctx = fakeContext({ inject, mounted: ['llm', 'webServer', 'timer', 'attachments'], onRegister: route => routes.push(route) })
 apply(ctx, {})
 
 const { ROUTE_MAIN, ROUTE_REGION } = await import('../src/adapter.js')
@@ -198,6 +207,71 @@ check('and says so in the log', ctx.__logs.some(line => line.includes('refused a
 stub.api.refuseAll = false
 await callRoute(api(), 'POST', '/api/our-free-model/reprobe')
 check('the next honest round hides them again', (await advertised(ROUTE_MAIN)).includes('deepseek-v4-flash-free'), false)
+
+// ── the settings boundary ────────────────────────────────────────────────────
+// Every one of these values ends up as a number in a timer or on the wire, and
+// the page's own cleared input field posts 0 for two of them. `Math.max(1, 'abc')`
+// is NaN, and a timer armed with NaN fires once a millisecond — a whole catalog
+// probe per second against a lane the plugin exists not to hammer; the same 0 on
+// the output ceiling is `min(capacity, 0)`, i.e. every turn cut to the floor.
+await callRoute(api(), 'POST', '/api/our-free-model/settings', { probeIntervalMinutes: 22, feedPollMinutes: 44, defaultMaxTokens: 20000 })
+check('a real value is taken as given', readSettings(), [22, 44, 20000])
+await callRoute(api(), 'POST', '/api/our-free-model/settings', { probeIntervalMinutes: 'abc', feedPollMinutes: 0, defaultMaxTokens: 0 })
+check('a cleared or nonsense field falls back to what was there, not to an extreme', readSettings(), [22, 44, 20000])
+
+function readSettings() {
+  const row = JSON.parse(fs.readFileSync(path.join(scratch, 'our-free-model', 'settings.json'), 'utf8'))
+  return [row.probeIntervalMinutes, row.feedPollMinutes, row.defaultMaxTokens]
+}
+
+// The forward listener spends this machine's free lane, so it binds loopback and
+// nothing else: a routable address in the settings file would put the whole
+// subnet's traffic through the user's egress on the strength of one string.
+const refusedBind = await callRoute(api(), 'POST', '/api/our-free-model/settings', { forward: { enabled: true, host: '0.0.0.0', port: forwardPort } })
+check('a routable forward bind is refused outright', refusedBind.status, 400)
+check('and says which address is acceptable', /loopback/i.test(refusedBind.json?.error ?? ''), true)
+check('nothing was written for it', JSON.parse(fs.readFileSync(path.join(scratch, 'our-free-model', 'settings.json'), 'utf8')).forward?.host, '127.0.0.1')
+
+const opened = await callRoute(api(), 'POST', '/api/our-free-model/settings', { forward: { enabled: true, host: '127.0.0.1', port: forwardPort } })
+check('a loopback bind still works', opened.json?.settings?.forward?.running, true)
+const listed = await fetch(`http://127.0.0.1:${forwardPort}/v1/models`, {
+  headers: { authorization: `Bearer ${JSON.parse(fs.readFileSync(path.join(scratch, 'our-free-model', 'settings.json'), 'utf8')).forwardKey}` },
+})
+check('and the listener answers its own model list', listed.status, 200)
+await callRoute(api(), 'POST', '/api/our-free-model/settings', { forward: { enabled: false, host: '127.0.0.1', port: forwardPort } })
+
+// ── the fence as the mounted route actually applies it ───────────────────────
+// `trust-test.mjs` checks the predicate. These check that the registered handler
+// consults it, on the real request path, in both of its two layers — which is the
+// part that can silently stop happening.
+const hostile = await callRoute(api(), 'GET', '/api/our-free-model/summary', undefined,
+  { authorization: 'internal-api', host: 'rebind.example:3000' })
+check('a request naming a host that is not this machine is refused at the route', hostile.status, 403)
+check('while the same route answers the loopback one', (await callRoute(api(), 'GET', '/api/our-free-model/summary')).status, 200)
+
+ctx.__services.connection.admit = () => ({ rejection: 401 })
+ctx.__mountService('connection')
+check('and once the composition publishes its own admission, that is what decides',
+  (await callRoute(api(), 'GET', '/api/our-free-model/summary')).status, 401)
+ctx.__services.connection.admit = () => undefined
+
+// ── one probe round at a time ────────────────────────────────────────────────
+// Four things start a catalog round — the periodic loop, the 2-minute egress
+// watch, a mid-turn `RegionError`, and the two buttons on this page — and each
+// used to await its own. A slow round plus a fresh trigger meant two full
+// catalogs were pinging the same lane at once, on a lane whose 429 carries a
+// growing `retry-after`, and the quota being spent belongs to the user.
+const probesOf = id => stub.requests.filter(row => row.body?.model === id).length
+holdProbe = { model: 'space-bunny-free', ...Promise.withResolvers() }
+const before = probesOf('mimo-v2.6-flash-free')
+const first = callRoute(api(), 'POST', '/api/our-free-model/reprobe')
+await until(() => probesOf('mimo-v2.6-flash-free') > before, { what: 'the first round to be in flight' })
+const second = callRoute(api(), 'POST', '/api/our-free-model/reprobe')
+holdProbe.resolve()
+await Promise.all([first, second])
+check('a second trigger joins the round in flight rather than starting another',
+  probesOf('mimo-v2.6-flash-free') - before, 1)
+holdProbe = null
 
 for (const dispose of ctx.__disposers.reverse()) dispose()
 await stub.close()

@@ -54,7 +54,13 @@ export class JsonStore {
         this.value = { ...this.value, ...parsed }
       }
     } catch {
-      // absent or corrupt: keep the initial value; the next write replaces it
+      // Absent is normal; unreadable is not. Keep the damaged file: without this
+      // the next scheduled flush renames a fresh default over it and the user's
+      // settings — the forward key, the acknowledged announcements — are gone with
+      // nothing on disk to recover and nothing in the log to explain.
+      try {
+        if (fs.existsSync(this.file)) fs.copyFileSync(this.file, `${this.file}.corrupt-${Date.now()}`)
+      } catch { /* a home we cannot write to is not this file's problem */ }
     }
   }
 

@@ -57,6 +57,16 @@ check('the session ceiling wins over the rung', budgetFor('deep', MIMO, 4000, DE
 check('the plugin default wins over the model capacity', budgetFor('deep', MIMO, undefined, 12000), 12000)
 check('a rung never rises above capacity', budgetFor('balanced', MIMO, undefined, 8192), 8192)
 check('and never falls below what an answer needs', budgetFor('deep', { maxOutput: 256, reasoning: true }, undefined, undefined), MIN_BUDGET)
+
+// The two ways a ceiling stops being a number. The settings page's own cleared
+// input field posts `Number('') || 0`, and a 0 ceiling is not "no ceiling":
+// `min(capacity, 0)` came out as the 512-token floor on every model, while the
+// picker went on advertising the 4 K / 16 K / 32 K ladder above it.
+check('a zero default ceiling reads as unset, not as the floor', budgetFor('balanced', MIMO, undefined, 0), 16384)
+check('so does a negative one', budgetFor('balanced', MIMO, undefined, -1), 16384)
+check('and one typed rather than chosen', budgetFor('balanced', MIMO, undefined, 'abc'), 16384)
+check('while a ceiling that is a number still binds', budgetFor('balanced', MIMO, undefined, 6000), 6000)
+check('the same holds for the session’s own maxTokens', budgetFor('balanced', MIMO, 0, DEFAULTS), 16384)
 check('an unknown rung resolves to the menu default rather than to no ceiling',
   budgetFor('turbo', MIMO, undefined, DEFAULTS), budgetFor('balanced', MIMO, undefined, DEFAULTS))
 

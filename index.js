@@ -40,7 +40,7 @@ import { AnnouncementFeed } from './src/feed.js'
 import { PluginUpdater, restoreBackup } from './src/updater.js'
 import { selfReload, watchPackage, isReloading } from './src/reload.js'
 import { createPushHub } from './src/push.js'
-import { rejectionFor } from './src/trust.js'
+import { rejectionFor, isLoopbackHost } from './src/trust.js'
 
 export const name = 'our-free-model'
 
@@ -279,7 +279,7 @@ export function apply(ctx, config) {
     })
   }
 
-  async function refreshAvailability() {
+  async function runProbeRound() {
     const results = await probeCatalog(catalog, { attributionUserAgent }, (id, result) => {
       availability.edit(state => ({ ...state, results: { ...state.results, [id]: { state: result.state, ...result.detail === undefined ? {} : { detail: result.detail }, ...result.ttftMs === undefined ? {} : { ttftMs: result.ttftMs }, latencyMs: result.latencyMs, at: Date.now() } } }))
     }, 2)
@@ -294,6 +294,29 @@ export function apply(ctx, config) {
     }
     emitTopology()
     return results
+  }
+
+  /**
+   * One catalog round at a time, for every caller.
+   *
+   * Four things start a round: the periodic catalog loop, the 2-minute egress
+   * watch, a mid-turn `RegionError`, and the two settings buttons. Each awaited a
+   * fresh `probeCatalog`, so a slow round and a trigger arriving during it ran
+   * whole catalogs side by side — against a lane whose 429 carries a growing
+   * `retry-after`, that is the user's own quota spent on the same question. A
+   * caller that arrives mid-round joins the round in flight instead of starting
+   * another, which is what the feed poll above already does.
+   */
+  let probeRound = null
+  async function refreshAvailability() {
+    if (probeRound !== null) return probeRound
+    const round = runProbeRound()
+    probeRound = round
+    try {
+      return await round
+    } finally {
+      if (probeRound === round) probeRound = null
+    }
   }
 
 
@@ -324,6 +347,14 @@ export function apply(ctx, config) {
     }
     if (!wanted) {
       forwardError = ''
+      return
+    }
+    // Checked again here, not only where the settings page posts: a headless
+    // composition has no page to click, and `settings.json` is the way in. A
+    // routable bind would spend this machine's free lane on the whole subnet.
+    if (!isLoopbackHost(desired.host || '127.0.0.1')) {
+      forwardError = 'the forward listener binds a loopback address only'
+      logger.warn?.(`our-free-model: forward listener not started (${forwardError})`)
       return
     }
     try {
@@ -683,7 +714,7 @@ export function apply(ctx, config) {
     ctx.effect(() => () => clearTimeout(handle), 'our-free-model: interval')
   }
 
-  const feedMinutes = Math.max(5, settings.get().feedPollMinutes ?? 30)
+  const feedMinutes = positiveOr(settings.get().feedPollMinutes, 30, 5)
   every(() => {
     void feed.poll()
     const hours = settings.get().updateCheckHours ?? 6
@@ -698,7 +729,7 @@ export function apply(ctx, config) {
       await watchEgress()
       await refreshCatalog({ probe: true })
     })().catch(error => logger.warn?.(`our-free-model: periodic refresh failed (${error?.message ?? error})`))
-  }, Math.max(1, settings.get().probeIntervalMinutes ?? 15) * 60_000)
+  }, positiveOr(settings.get().probeIntervalMinutes, 15, 1) * 60_000)
   every(() => {
     void watchEgress().catch(() => {})
   }, 120_000)
@@ -725,6 +756,47 @@ export function apply(ctx, config) {
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * A period that cannot become a hot loop.
+ *
+ * `setTimeout(fn, NaN)` is `setTimeout(fn, 1)` in Node, and a settings file the
+ * user edits by hand (the only way in on a headless composition) can carry
+ * anything. Both timers below take their period from a stored number, so the
+ * guard belongs here rather than in each caller.
+ */
+function positiveOr(value, fallback, floor = 1) {
+  const number = Number(value)
+  if (!Number.isFinite(number) || number <= 0) return fallback
+  return Math.max(floor, Math.trunc(number))
+}
+
+/**
+ * Coerce the settings a timer or the wire reads.
+ *
+ * The settings page's own cleared input field posts `0`: on the output ceiling
+ * that read as `min(model capacity, 0)` and every turn came back capped at the
+ * 512-token floor, and on a period it asked for a probe round a minute. A value
+ * that is not a positive number is "the user did not set one", so it falls back
+ * to what ships rather than being clamped into an extreme.
+ */
+function sanitizeSettings(patch, current) {
+  const next = { ...patch }
+  const positive = (key, fallback) => {
+    if (next[key] === undefined) return
+    const value = Number(next[key])
+    next[key] = Number.isFinite(value) && value > 0 ? Math.trunc(value) : (Number(current[key]) || fallback)
+  }
+  positive('probeIntervalMinutes', 15)
+  positive('feedPollMinutes', 30)
+  positive('defaultMaxTokens', 32768)
+  if (next.updateCheckHours !== undefined) {
+    // Zero is a real answer here: it means "stop checking for updates".
+    const hours = Number(next.updateCheckHours)
+    next.updateCheckHours = Number.isFinite(hours) && hours >= 0 ? Math.trunc(hours) : (Number(current.updateCheckHours) || 6)
+  }
+  return next
+}
 
 /**
  * Which route advertises which model, given the last probe.
@@ -785,11 +857,17 @@ function materializeCatalog(ids) {
  * text-only model never sees an image block in the first place.
  */
 function imageResolver(ctx, logger) {
-  const attachments = typeof ctx.get === 'function' ? ctx.get('attachments') : undefined
-  if (attachments === undefined || typeof attachments.imageHostPath !== 'function') return undefined
+  if (typeof ctx.get !== 'function') return undefined
   const cache = new Map()
   const MAX_IMAGE_BYTES = 8 * 1024 * 1024
   return ref => {
+    // Looked up per call, not once at apply time: this is the third instance of
+    // the same cordis trap the release note describes for `webServer` and
+    // `connection` — a service that plugins load before is not provided yet, so a
+    // one-shot read silently cost the whole feature (here: image attachments,
+    // with nothing in the log to say so).
+    const attachments = ctx.get('attachments')
+    if (attachments === undefined || typeof attachments.imageHostPath !== 'function') return undefined
     const id = String(ref?.attachmentId ?? '')
     if (id === '') return undefined
     const cached = cache.get(id)
@@ -985,8 +1063,21 @@ function createApiRoutes(deps) {
       if (method === 'POST' && routePath === '/settings') {
         const patch = await readJson(req)
         const current = deps.settings.get()
-        const next = { ...current, ...pick(patch, ['enabled', 'exposeRegionModels', 'probeIntervalMinutes', 'defaultMaxTokens', 'announcementAck', 'feedUrl', 'feedPollMinutes', 'notifyOs', 'updateCheckHours', 'autoReloadWatch']) }
-        if (patch.forward !== undefined) next.forward = { ...(current.forward ?? {}), ...pick(patch.forward, ['enabled', 'host', 'port']) }
+        const next = sanitizeSettings({ ...current, ...pick(patch, ['enabled', 'exposeRegionModels', 'probeIntervalMinutes', 'defaultMaxTokens', 'announcementAck', 'feedUrl', 'feedPollMinutes', 'notifyOs', 'updateCheckHours', 'autoReloadWatch']) }, current)
+        if (patch.forward !== undefined) {
+          const forward = { ...(current.forward ?? {}), ...pick(patch.forward, ['enabled', 'host', 'port']) }
+          // The listener spends this machine's lane, and a routable bind address
+          // would let the whole subnet spend it too. Refused here so the settings
+          // page says why, and again in `syncForward` for a hand-edited file.
+          if (forward.enabled === true && !isLoopbackHost(forward.host ?? '127.0.0.1')) {
+            return send(400, { error: 'the forward listener binds a loopback address only' })
+          }
+          if (forward.port !== undefined) {
+            const port = Number(forward.port)
+            forward.port = Number.isFinite(port) && port >= 1 && port <= 65535 ? Math.trunc(port) : (current.forward?.port ?? 0)
+          }
+          next.forward = forward
+        }
         deps.settings.update(next)
         deps.settings.flush()
         await deps.syncForward()

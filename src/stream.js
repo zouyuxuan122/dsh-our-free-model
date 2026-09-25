@@ -16,6 +16,7 @@
  */
 
 import crypto from 'node:crypto'
+import { classifyFailure } from './http.js'
 import { restoreToolName } from './upstream.js'
 
 /** Mint a tool-call id for providers that stream arguments without one. */
@@ -185,7 +186,7 @@ function feedClaude(sink, event, onFinish, renameMap) {
   if (event.type === 'message_delta') {
     const usage = event.usage
     if (usage && number(usage.output_tokens) !== undefined) {
-      onFinish({ inputTokens: 0, outputTokens: number(usage.output_tokens), totalTokens: number(usage.output_tokens) }, 'usage')
+      onFinish({ outputTokens: number(usage.output_tokens) }, 'usage')
     }
     const stop = event.delta?.stop_reason
     if (stop) onFinish(undefined, 'finish', stop)
@@ -276,7 +277,15 @@ export async function * readStream(lines, wire, renameMap, now = () => Date.now(
   const state = { usage: undefined, finish: undefined, sawToolCall: false, firstDeltaAt: undefined, sawReasoning: false, sawText: false, brokenToolCall: false }
 
   const onFinish = (usage, kind, token) => {
-    if (kind === 'usage' && usage !== undefined) state.usage = usage
+    if (kind === 'usage' && usage !== undefined) {
+      const carried = state.usage
+      // A usage report that names no input side is `message_delta` on the Messages
+      // wire: it carries only the output count, and taking it whole dropped the
+      // prompt counts `message_start` had already given for every Claude turn.
+      state.usage = carried !== undefined && usage.inputTokens === undefined
+        ? { ...carried, ...usage, totalTokens: Math.max(0, (carried.totalTokens ?? 0) - (carried.outputTokens ?? 0)) + (usage.outputTokens ?? 0) }
+        : usage
+    }
     if (kind === 'finish') state.finish = token
   }
 
@@ -287,11 +296,17 @@ export async function * readStream(lines, wire, renameMap, now = () => Date.now(
     let payload
     try { payload = JSON.parse(text) } catch { continue }
     if (payload.type === 'error' || payload.error) {
+      // Classify an in-stream refusal exactly as an error *envelope* is
+      // classified, because everything downstream decides off `code`. This throw
+      // used to carry only `llmCode`, which nothing reads: the failure reached
+      // `toFailure` unrecognized and came out as `TRANSPORT` — a retryable code —
+      // so the harness re-sent a turn whose partial answer had already been
+      // streamed, and a mid-turn geography refusal never reached the re-probe
+      // that watches for `CODE.region`.
       const failure = payload.error ?? payload
-      throw Object.assign(new Error(typeof failure.message === 'string' ? failure.message : 'upstream error'), {
-        llmCode: typeof failure.type === 'string' ? failure.type : 'SERVER',
-        upstream: payload,
-      })
+      const classified = classifyFailure(undefined, payload)
+      if (typeof failure.message !== 'string') classified.message = 'upstream error'
+      throw Object.assign(classified, { upstream: payload })
     }
     if (state.firstDeltaAt === undefined && carriesDelta(payload, wire)) state.firstDeltaAt = now()
     if (wire === 'chat') feedChat(sink, payload, renameMap, onFinish)

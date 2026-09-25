@@ -13,7 +13,11 @@
  * Run: node scripts/speed-stat-test.mjs
  */
 
-const { decodeWindow, migrateStats, recordUsage, STATS_INITIAL } = await import('../src/store.js')
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+
+const { decodeWindow, migrateStats, recordUsage, JsonStore, STATS_INITIAL } = await import('../src/store.js')
 const { windowTokens } = await import('../src/stream.js')
 const { buildStats } = await import('../index.js')
 
@@ -85,6 +89,26 @@ check('migration keeps what was really measured', [migrated.samples[0].ttftMs, m
 check('a failure is not promoted to a latency sample', [migrated.samples[1].ttftMs, migrated.samples[1].tps], [null, null])
 check('token totals survive', [legacyRow.input, legacyRow.output, migrated.requests], [100, 65, 3])
 check('migration is idempotent', migrateStats(migrated), migrated)
+
+// ── the file itself ──────────────────────────────────────────────────────────
+// A half-written store file is the one failure the plugin used to answer by
+// quietly starting over: `load()` swallowed the parse error, kept the defaults,
+// and the first scheduled flush renamed them over the top of whatever was there —
+// the forward key and the acknowledged announcements gone with nothing on disk to
+// recover and nothing in the log to explain it.
+const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'ofm-store-'))
+const damaged = path.join(scratch, 'settings.json')
+const original = '{"forwardKey":"ofm-was-here","probeIntervalMinutes":'
+fs.writeFileSync(damaged, original)
+const store2 = new JsonStore(damaged, { forwardKey: '', probeIntervalMinutes: 15 })
+check('a file that will not parse falls back to the defaults', [store2.get().forwardKey, store2.get().probeIntervalMinutes], ['', 15])
+store2.update({ forwardKey: 'ofm-new' })
+store2.flush()
+check('the damaged bytes survive the write that replaces them',
+  fs.readdirSync(scratch).some(name => name.startsWith('settings.json.corrupt-')
+    && fs.readFileSync(path.join(scratch, name), 'utf8') === original), true)
+check('and the replacement is readable by the next load', new JsonStore(damaged, { forwardKey: '' }).get().forwardKey, 'ofm-new')
+fs.rmSync(scratch, { recursive: true, force: true })
 
 console.log(failures === 0 ? '\nspeed-stat: the panel can no longer be averaged into nonsense' : `\nspeed-stat: ${failures} check(s) failed`)
 process.exit(failures === 0 ? 0 : 1)

@@ -1,18 +1,19 @@
-<p align="center">
+<div align="center">
   <img src="icon.svg" alt="Our Free Model — DeepSeek Harness 免费模型插件" width="120">
-</p>
 
-<p align="center"><strong>简体中文</strong> | <a href="README_EN.md">English</a></p>
+# dsh-our-free-model
 
-<p align="center">
+**简体中文** | [English](README_EN.md)
+
   <img alt="许可证" src="https://img.shields.io/badge/license-MIT-263146?style=flat-square">
   <img alt="零依赖" src="https://img.shields.io/badge/dependencies-zero-4b6fff?style=flat-square">
   <img alt="无构建步骤" src="https://img.shields.io/badge/build%20step-none-7da1de?style=flat-square">
   <img alt="适配内核" src="https://img.shields.io/badge/dsh-0.1.5--0.1.7--rc.2-2f6f4f?style=flat-square">
   <img alt="状态" src="https://img.shields.io/badge/status-beta-f0a441?style=flat-square">
-</p>
 
-# dsh-our-free-model
+</div>
+
+<div align="center">
 
 > 你只需在 dsh 里装上这个插件，无需登录、注册、填 API Key 或任何其它操作，
 > 就能用上包括 Muse Spark 1.3、MiMo V2.6 在内的前沿模型——完全免费，不限量。
@@ -25,6 +26,8 @@
 > 思考强度下发的是真实预算而不是提示词，另附一个 OpenAI 兼容的本地转发端口。
 >
 > 纯插件挂载：不改内核、无构建步骤、零依赖。
+
+</div>
 
 ---
 

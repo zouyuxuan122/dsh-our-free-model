@@ -1,18 +1,19 @@
-<p align="center">
+<div align="center">
   <img src="icon.svg" alt="Our Free Model — free model provider plugin for DeepSeek Harness" width="120">
-</p>
 
-<p align="center"><a href="README.md">简体中文</a> | <strong>English</strong></p>
+# dsh-our-free-model
 
-<p align="center">
+[简体中文](README.md) | **English**
+
   <img alt="license" src="https://img.shields.io/badge/license-MIT-263146?style=flat-square">
   <img alt="zero dependencies" src="https://img.shields.io/badge/dependencies-zero-4b6fff?style=flat-square">
   <img alt="build step" src="https://img.shields.io/badge/build%20step-none-7da1de?style=flat-square">
-  <img alt="dsh kernels" src="https://img.shields.io/badge/dsh-0.1.5--0.1.7-2f6f4f?style=flat-square">
+  <img alt="dsh kernels" src="https://img.shields.io/badge/dsh-0.1.5--0.1.7--rc.2-2f6f4f?style=flat-square">
   <img alt="status" src="https://img.shields.io/badge/status-beta-f0a441?style=flat-square">
-</p>
 
-# dsh-our-free-model
+</div>
+
+<div align="center">
 
 > All you do is install this plugin in dsh — no login, no sign-up, no API key, no other
 > step of any kind. The frontier models are simply there, Muse Spark 1.3 and MiMo V2.6
@@ -26,6 +27,8 @@
 > a local OpenAI-compatible forward port comes included.
 >
 > It mounts as a pure plugin: no core changes, no build step, zero dependencies.
+
+</div>
 
 ---
 

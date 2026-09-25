@@ -2,33 +2,12 @@
   "$schema": "./announcements.schema.md",
   "announcements": [
     {
-      "id": "2026-09-25-v1.1.2-release",
-      "title": "v1.1.2：公告中心、应用内升级与热重载上线",
+      "id": "2026-09-25-v1.2.1-release",
+      "title": "v1.2.1：修复重试循环与空响应，公告中心默认折叠",
       "level": "update",
       "pinned": true,
-      "createdAt": "2026-09-25T00:00:00Z",
-      "html": "<p><strong>Our Free Model v1.1.2</strong> 发布，本次更新带来四个新能力：</p><ul><li><strong>公告中心</strong>——仓库主人推送的新公告实时到达（支持图文排版），紧急公告全屏强提醒。</li><li><strong>系统通知</strong>——在公告中心开启后，新公告与插件更新弹出系统级通知（桌面端经系统通道发送）。</li><li><strong>应用内升级</strong>——设置 → 插件升级 一键升级：下载、SHA-256 校验、备份、安装、热重载全自动。</li><li><strong>热重载</strong>——升级与代码更新即时生效，无需重启应用。</li></ul><p>同时：全部模型保持可达（探测失败不再从选择器消失），插件接口加上了与内核一致的鉴权围栏。</p><p><em>编辑于发布后：这段文字是发布后修改的，用于验证“编辑公告”链路。</em></p>"
-    },
-    {
-      "id": "2026-09-25-owner-pushed-live",
-      "title": "这条公告是推送到 GitHub 后实时到达的",
-      "level": "info",
-      "createdAt": "2026-09-24T21:33:49.325Z",
-      "html": "<p>如果你看到这条公告，说明<strong>仓库主人 → GitHub → 你的插件</strong>的推送链路真实可用。</p>"
-    },
-    {
-      "id": "2026-09-25-live-demo-toast",
-      "title": "现场演示：这条公告刚刚从 GitHub 推送到你的插件",
-      "level": "info",
-      "createdAt": "2026-09-25T00:52:45.420Z",
-      "html": "<p>仓库主人刚把这条公告推送到仓库，插件随即从 <code>raw.githubusercontent.com</code> 拉取并在你的界面弹出提示——这就是日常发布公告的全部流程。</p>"
-    },
-    {
-      "id": "2026-09-25-live-demo-urgent",
-      "title": "现场演示：紧急公告的全屏提醒",
-      "level": "urgent",
-      "createdAt": "2026-09-25T00:52:45.420Z",
-      "html": "<p><strong>urgent</strong> 级别的公告会以全屏弹窗形式强制提醒，点击“知道了”即标记已读。</p><p>适合发布维护通知、重要变更等必须被看到的信息。</p>"
+      "createdAt": "2026-09-25T04:30:00Z",
+      "html": "<p><strong>Our Free Model v1.2.1</strong> 发布，本次为稳定性修复版本：</p><ul><li><strong>修复反复重试</strong>——上游偶发把被截断的工具调用误报为可执行，导致个别回合长时间重复劳动；现在会正确结束回合，不再空转。</li><li><strong>空响应自动重试</strong>——极少数情况下网关返回空内容，插件现在会自动退避重试，而不是静默结束。</li><li><strong>公告中心默认折叠</strong>——设置页更清爽，有未读公告时才自动展开。</li></ul><p>旧版本用户请前往 <strong>设置 → 插件升级</strong> 一键升级；新安装用户无需任何操作。</p>"
     }
   ]
 }

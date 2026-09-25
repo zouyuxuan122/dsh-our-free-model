@@ -15,6 +15,20 @@
       "level": "info",
       "createdAt": "2026-09-24T21:33:49.325Z",
       "html": "<p>如果你看到这条公告，说明<strong>仓库主人 → GitHub → 你的插件</strong>的推送链路真实可用。</p>"
+    },
+    {
+      "id": "2026-09-25-live-demo-toast",
+      "title": "现场演示：这条公告刚刚从 GitHub 推送到你的插件",
+      "level": "info",
+      "createdAt": "2026-09-25T00:52:45.420Z",
+      "html": "<p>仓库主人刚把这条公告推送到仓库，插件随即从 <code>raw.githubusercontent.com</code> 拉取并在你的界面弹出提示——这就是日常发布公告的全部流程。</p>"
+    },
+    {
+      "id": "2026-09-25-live-demo-urgent",
+      "title": "现场演示：紧急公告的全屏提醒",
+      "level": "urgent",
+      "createdAt": "2026-09-25T00:52:45.420Z",
+      "html": "<p><strong>urgent</strong> 级别的公告会以全屏弹窗形式强制提醒，点击“知道了”即标记已读。</p><p>适合发布维护通知、重要变更等必须被看到的信息。</p>"
     }
   ]
 }

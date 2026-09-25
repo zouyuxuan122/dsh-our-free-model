@@ -256,8 +256,7 @@ monotonically with the level.
 
 ### Two kernel behaviours that cost real debugging time
 
-Both are documented in [`docs/upstream-findings.md`](docs/upstream-findings.md);
-they are recorded here because they will bite any provider plugin:
+These are recorded here because they will bite any provider plugin:
 
 1. **`providerRetryPolicy()` is stored verbatim.** Neither kernel resolves it, and
    the backoff scheduler reads `initialDelayMs / maxDelayMs / jitterRatio` off the

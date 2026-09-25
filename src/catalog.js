@@ -1,17 +1,12 @@
 /**
  * Model catalog for the free lane.
  *
- * Three sources, deliberately layered so no single one can break the plugin:
+ * Two sources, deliberately layered so no single one can break the plugin:
  *
  * 1. the upstream listing itself (`/zen/v1/models`) — the authoritative set of
  *    ids the gateway will currently name;
  * 2. a vetted local capability table (context window / vision / reasoning),
- *    because the upstream listing discloses an id and nothing else;
- * 3. an optional refresh of the upstream router project's published tables, so a
- *    newly discovered model's capacities can arrive without a plugin release.
- *
- * Layer 3 is fail-open by construction: it is parsed by tolerant extraction, and
- * any shape drift simply yields no overlay rather than an error.
+ *    because the upstream listing discloses an id and nothing else.
  *
  * @module src/catalog.js
  */
@@ -97,13 +92,12 @@ export function displayModelName(modelId) {
 }
 
 /**
- * Merge the upstream listing with the capability overlay.
+ * Merge the upstream listing with the local capability table.
  *
  * @param {string[]} ids - raw upstream model ids
- * @param {Record<string, object>} [overlay] - router-published capacities by id
  * @returns {Array<object>} catalog entries in listing order
  */
-export function buildCatalog(ids, overlay = {}) {
+export function buildCatalog(ids) {
   const seen = new Set()
   const entries = []
   for (const raw of ids) {
@@ -113,15 +107,14 @@ export function buildCatalog(ids, overlay = {}) {
     if (seen.has(base)) continue
     seen.add(base)
     const caps = capabilitiesFor(base)
-    const extra = overlay[base] ?? {}
     entries.push({
       id: base,
       name: displayModelName(base),
       wire: isResponsesModel(base) ? 'responses' : 'chat',
-      vision: extra.vision === true || caps.vision === true,
-      reasoning: extra.reasoning !== false && caps.reasoning !== false,
-      contextWindow: number(extra.contextWindow) ?? number(caps.contextWindow) ?? 131072,
-      maxOutput: number(extra.maxOutput) ?? number(caps.maxOutput) ?? 32768,
+      vision: caps.vision === true,
+      reasoning: caps.reasoning !== false,
+      contextWindow: number(caps.contextWindow) ?? 131072,
+      maxOutput: number(caps.maxOutput) ?? 32768,
       canDisableThinking: caps.canDisableThinking !== false,
       regionSensitive: isRegionSensitive(base),
     })
@@ -137,57 +130,4 @@ function number(value) {
 export function parseListing(payload) {
   const rows = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload?.models) ? payload.models : Array.isArray(payload) ? payload : []
   return rows.map(row => (typeof row === 'string' ? row : row?.id)).filter(id => typeof id === 'string' && id !== '')
-}
-
-/**
- * Pull the published router project's capability tables and lift the numeric
- * capacities out of them.
- *
- * Deliberately tolerant: it reads `"some-id": { … contextWindow: 123 … }` pairs
- * and `{ pattern: "*", caps: { … } }` rows by key, ignores everything it does
- * not recognise, and yields an empty overlay on any problem. Callers treat the
- * result as a bonus, never a dependency.
- */
-export function parseRouterCapabilities(source) {
-  const overlay = {}
-  if (typeof source !== 'string' || source.length === 0) return overlay
-  const entry = /\\"?([a-z0-9][a-z0-9._:/-]{2,60})\\"?\s*:\s*\{([^{}]{0,400})\}/g
-  let match
-  while ((match = entry.exec(source)) !== null) {
-    const id = match[1]
-    const body = match[2]
-    if (!isFreeLane(id) && !/^[a-z0-9.-]+$/.test(id)) continue
-    const caps = readCaps(body)
-    if (caps === undefined) continue
-    const merged = overlay[id] ?? {}
-    overlay[id] = { ...merged, ...caps }
-  }
-  return overlay
-}
-
-function readCaps(body) {
-  const context = /\bcontextWindow\s*:\s*(\d{3,9})/.exec(body)?.[1]
-  const output = /\bmaxOutput\s*:\s*(\d{2,9})/.exec(body)?.[1]
-  const vision = /\bvision\s*:\s*(true|false)/.exec(body)?.[1]
-  const reasoning = /\breasoning\s*:\s*(true|false)/.exec(body)?.[1]
-  if (context === undefined && output === undefined && vision === undefined && reasoning === undefined) return undefined
-  const out = {}
-  if (context !== undefined) out.contextWindow = Number(context)
-  if (output !== undefined) out.maxOutput = Number(output)
-  if (vision !== undefined) out.vision = vision === 'true'
-  if (reasoning !== undefined) out.reasoning = reasoning === 'true'
-  return out
-}
-
-/** Extract `{id, name}` rows from the router project's provider registry file. */
-export function parseRouterRegistry(source) {
-  const rows = []
-  if (typeof source !== 'string' || source.length === 0) return rows
-  const entry = /\{\s*id\s*:\s*"([^"]{2,80})"(?:\s*,\s*name\s*:\s*"([^"]{1,80})")?/g
-  let match
-  while ((match = entry.exec(source)) !== null) {
-    if (!isFreeLane(match[1])) continue
-    rows.push({ id: match[1], name: match[2] })
-  }
-  return rows
 }

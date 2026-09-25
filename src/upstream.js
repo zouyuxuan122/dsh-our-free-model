@@ -2,7 +2,7 @@
  * Upstream wire for the免密 free lane.
  *
  * Every fact encoded here was verified against the live gateway on 2026-09-24
- * by direct request (see docs/upstream-findings.md): the public pooled
+ * by direct request: the public pooled
  * credential, the client fingerprint headers, the per-model endpoint split, the
  * free-tier tool-fingerprint gate (403 FreeTierError without it), the
  * per-session quota accounting (429 FreeUsageLimitError when a fresh session is

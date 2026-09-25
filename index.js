@@ -28,7 +28,7 @@ import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { FreeModelAdapter, ROUTE_LABELS, ROUTE_MAIN, ROUTE_REGION } from './src/adapter.js'
 import { JsonStore, SETTINGS_INITIAL, STATS_INITIAL, STATS_VERSION, DATA_DIR_NAME, MIN_DECODE_MS, decodeWindow, migrateStats, pruneDays, recordUsage, resolveDshHome } from './src/store.js'
-import { buildCatalog, parseListing, parseRouterCapabilities, parseRouterRegistry, UPSTREAM_MODELS_URL } from './src/catalog.js'
+import { buildCatalog, parseListing, UPSTREAM_MODELS_URL } from './src/catalog.js'
 import { STATE, detectEgress, probeCatalog } from './src/probe.js'
 import { generateKey, startForwardServer } from './src/forward.js'
 import { CODE, UpstreamError } from './src/http.js'
@@ -67,9 +67,6 @@ function readPackageVersion() {
  * rather than blocking activation.
  */
 export const inject = ['llm', 'webServer', 'timer']
-
-/** Published tables of the upstream router project, used as a capability overlay. */
-const ROUTER_RAW_BASE = 'https://raw.githubusercontent.com/decolua/9router/main/open-sse'
 
 /** Static fallback catalog, so a cold start with no network still lists models. */
 const FALLBACK_CATALOG = buildCatalog([
@@ -238,49 +235,17 @@ export function apply(ctx, config) {
     } catch (error) {
       logger.warn?.(`our-free-model: model listing refresh failed (${error?.message ?? error}); keeping the cached catalog`)
     }
-    // The router project's published tables fill in what the gateway's flat id
-    // list omits, and name models this build has never seen. Both fetches are
-    // fail-open: this is an enhancement, and the plugin works without it.
-    const [overlay, registryRows] = await Promise.all([fetchRouterOverlay(logger), fetchRouterRegistry(logger)])
-    const merged = [...ids, ...registryRows.map(row => row.id)]
-    if (merged.length > 0) {
-      catalog = buildCatalog(merged, overlay)
+    if (ids.length > 0) {
+      catalog = buildCatalog(ids)
       catalogStore.update({ at: Date.now(), entries: catalog.map(entry => entry.id) })
       catalogStore.flush()
-      settings.update({ routerSyncedAt: Date.now(), catalogSyncedAt: Date.now() })
+      settings.update({ catalogSyncedAt: Date.now() })
     } else {
       catalog = materializeCatalog(catalogStore.get().entries ?? [])
     }
     if (probe) await refreshAvailability()
     emitTopology()
     return catalog
-  }
-
-  /**
-   * Pull the upstream router project's capability table.
-   * @returns {Promise<Record<string, object>>} capacities keyed by model id, empty on any failure
-   */
-  async function fetchRouterOverlay() {
-    const source = await fetchText(`${ROUTER_RAW_BASE}/providers/capabilities.js`)
-    return source === '' ? {} : parseRouterCapabilities(source)
-  }
-
-  /**
-   * Pull the router project's free-tier registry rows.
-   * @returns {Promise<Array<{id:string,name?:string}>>}
-   */
-  async function fetchRouterRegistry() {
-    const source = await fetchText(`${ROUTER_RAW_BASE}/providers/registry/opencode.js`)
-    return source === '' ? [] : parseRouterRegistry(source)
-  }
-
-  async function fetchText(url) {
-    try {
-      const response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout?.(15000) })
-      return response.ok ? await response.text() : ''
-    } catch {
-      return ''
-    }
   }
 
   async function fetchListing() {

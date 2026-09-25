@@ -82,7 +82,7 @@ const call = async (method, url, body) => {
   try { return { status, json: JSON.parse(payload) } } catch { return { status, raw: payload.slice(0, 200) } }
 }
 
-// Let the boot refresh finish: listing + router overlay + a full availability probe.
+// Let the boot refresh finish: listing + a full availability probe.
 const deadline = Date.now() + 120000
 while (Date.now() < deadline && !(captured.adapters.length > 0 && ctx.__routes.length > 0)) {
   await new Promise(resolve => setTimeout(resolve, 500))

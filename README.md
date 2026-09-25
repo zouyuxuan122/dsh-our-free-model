@@ -252,8 +252,7 @@ client.js       浏览器半身：手写 ModuleLoader bundle，无构建步骤
 
 ### 两个真实浪费过调试时间的内核行为
 
-都记在 [`docs/upstream-findings.md`](docs/upstream-findings.md) 里；这里摘出来是因为任何写
-provider 插件的人都会踩：
+这里摘出来是因为任何写 provider 插件的人都会踩：
 
 1. **`providerRetryPolicy()` 被原样存下来用**。两版内核都不解析它，而退避调度器读的是
    **顶层**的 `initialDelayMs / maxDelayMs / jitterRatio`。把这三项嵌在 `backoff:{}` 里，

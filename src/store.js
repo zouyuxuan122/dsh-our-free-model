@@ -142,8 +142,6 @@ export const SETTINGS_INITIAL = {
   announcementAck: '',
   /** Last full catalog refresh timestamp. */
   catalogSyncedAt: 0,
-  /** Router-project overlay refresh timestamp. */
-  routerSyncedAt: 0,
   /** Owner override for the announcement/update feed location. `{repo}` expands
    *  to the plugin repository slug; empty means the shipped GitHub sources. */
   feedUrl: '',

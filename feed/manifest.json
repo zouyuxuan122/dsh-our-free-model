@@ -1,13 +1,13 @@
 {
-  "version": "1.2.0",
+  "version": "1.2.1",
   "base": "../",
-  "publishedAt": "2026-09-24T22:14:29.173Z",
-  "notes": "",
+  "publishedAt": "2026-09-25T03:30:21.625Z",
+  "notes": "修复：模型输出预算截断工具调用时被误判为可执行调用，导致反复重试的死循环与超慢回合；网关返回空响应现在会自动重试；无 id 的工具调用自动补齐；设置页公告默认折叠，仅有未读时自动展开。",
   "files": [
     {
       "path": "client.js",
-      "size": 102503,
-      "sha256": "3db34d80496dc7c115e9f2a95a1e9d72b894de6d8829904814da5b9ecf2f450b"
+      "size": 103138,
+      "sha256": "1ab7fb690c060031783a06e5dc4755686378f5ad20c79356b5ba1623809bd23a"
     },
     {
       "path": "cordis.patch.yml",
@@ -21,8 +21,8 @@
     },
     {
       "path": "index.js",
-      "size": 47802,
-      "sha256": "5523b4835ee1efa8c807c7839d92b602388d27156bb2d0f4022a5de7491b6dae"
+      "size": 48253,
+      "sha256": "cef4400685cbe8f3909a00ad77ed4da59cc97860bf22b32f803a489aa920d741"
     },
     {
       "path": "LICENSE",
@@ -42,22 +42,22 @@
     {
       "path": "package.json",
       "size": 1144,
-      "sha256": "3a593c63a02d4e29bda5fcc8cf2bebe8e08f24148c4d9e4d6ed370ed9bb390f3"
+      "sha256": "f73dcbdb73fb1f1b7f0294ad52680f18f40c9b94faa9102e0a9a3bdf0607fc90"
     },
     {
       "path": "README_EN.md",
-      "size": 24308,
-      "sha256": "8f35c1da2f4304a681ce51e1742df0eba30aafef153e52bfd31f1a244c06f71b"
+      "size": 24279,
+      "sha256": "5898abe270cef4e913bcc8dc68eda30d46319ba90395711cbbb4ec4b0c45e5ce"
     },
     {
       "path": "README.md",
-      "size": 24508,
-      "sha256": "b67662ec38a3b1303d4b9c0c9d7d46bfdd063a2c796e7f21d220653ab2661102"
+      "size": 24473,
+      "sha256": "4f6c006bb69a0e3ddfef3325710242ff3f3217851f907c84659cfeb1411d760b"
     },
     {
       "path": "src/adapter.js",
-      "size": 11932,
-      "sha256": "6926658d2657548869364ad38ee1a208372755da48db51849c27be42b35a0bca"
+      "size": 13514,
+      "sha256": "89ec3f0476c0915528abb3812a007cf3e50f00de8f31e56329f3631093190b18"
     },
     {
       "path": "src/catalog.js",
@@ -116,8 +116,8 @@
     },
     {
       "path": "src/stream.js",
-      "size": 13120,
-      "sha256": "c0609a1bf46fd704e52e6fa7d4835448aae6350178249e5d6e434cd697ccb3e6"
+      "size": 14466,
+      "sha256": "f2d65cd619f67580afb052df572a61c0c97bbf1024a879214785bfa03b36065e"
     },
     {
       "path": "src/trust.js",

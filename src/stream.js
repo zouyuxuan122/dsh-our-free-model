@@ -15,7 +15,13 @@
  * @module src/stream.js
  */
 
+import crypto from 'node:crypto'
 import { restoreToolName } from './upstream.js'
+
+/** Mint a tool-call id for providers that stream arguments without one. */
+function mintToolCallId() {
+  return `call_${crypto.randomBytes(12).toString('hex')}`
+}
 
 class BlockSink {
   constructor(yieldChunk) {
@@ -25,13 +31,18 @@ class BlockSink {
     this.open = new Map()
     this.usage = undefined
     this.sawReasoning = false
+    this.brokenToolCall = false
   }
 
   /** Open (or fetch) the block a given stream slot maps to. */
   slot(key, kind) {
     const existing = this.open.get(key)
     if (existing !== undefined) return existing
-    const block = { index: this.next++, kind, text: '', args: '', id: '', name: '' }
+    // A tool call without a provider id would come back next turn with an empty
+    // toolCallId, which the pairing repair then drops on both sides — the model
+    // never sees its own result and re-issues the call forever. Mint a stable
+    // stand-in; a provider id arriving later still overrides it.
+    const block = { index: this.next++, kind, text: '', args: '', id: kind === 'tool-call' ? mintToolCallId() : '', name: '' }
     this.open.set(key, block)
     this.emit({ type: 'block-start', index: block.index, blockType: kind === 'reasoning' ? 'reasoning' : kind === 'tool-call' ? 'tool-call' : 'text' })
     return block
@@ -39,6 +50,7 @@ class BlockSink {
 
   text(key, delta) {
     if (delta === undefined || delta === null || delta === '') return
+    this.sawText = true
     const block = this.slot(key, 'text')
     block.text += delta
     this.emit({ type: 'text-delta', index: block.index, text: delta })
@@ -70,6 +82,13 @@ class BlockSink {
       if (block.kind === 'text' && block.text !== '') this.emit({ type: 'block-end', index: block.index, block: { type: 'text', text: block.text } })
       else if (block.kind === 'reasoning' && block.text !== '') this.emit({ type: 'block-end', index: block.index, block: { type: 'reasoning', text: block.text } })
       else if (block.kind === 'tool-call') {
+        // Arguments that never parse are an unexecutable call. The gateway
+        // reports finish "tool_calls" even when the output ceiling cut the JSON
+        // mid-string (verified live 2026-09-25), so the finish token alone
+        // cannot be trusted; the adapter downgrades such a turn to max-tokens,
+        // which makes the harness's assembler prune the call instead of
+        // executing it and looping on the model's retry.
+        try { JSON.parse(block.args === '' ? '{}' : block.args) } catch { this.brokenToolCall = true }
         this.emit({
           type: 'block-end', index: block.index,
           block: { type: 'tool-call', id: block.id, name: block.name, arguments: block.args === '' ? '{}' : block.args },
@@ -245,7 +264,7 @@ export function windowTokens(usage, sawReasoning) {
 export async function * readStream(lines, wire, renameMap, now = () => Date.now()) {
   const outbox = []
   const sink = new BlockSink(chunk => outbox.push(chunk))
-  const state = { usage: undefined, finish: undefined, sawToolCall: false, firstDeltaAt: undefined, sawReasoning: false }
+  const state = { usage: undefined, finish: undefined, sawToolCall: false, firstDeltaAt: undefined, sawReasoning: false, sawText: false, brokenToolCall: false }
 
   const onFinish = (usage, kind, token) => {
     if (kind === 'usage' && usage !== undefined) state.usage = usage
@@ -270,11 +289,14 @@ export async function * readStream(lines, wire, renameMap, now = () => Date.now(
     else if (wire === 'messages') feedClaude(sink, payload, onFinish, renameMap)
     else feedResponses(sink, payload, onFinish, renameMap)
     if (sink.sawReasoning) state.sawReasoning = true
+    if (sink.sawText) state.sawText = true
+    if (sink.brokenToolCall) state.brokenToolCall = true
     for (const block of sink.open.values()) if (block.kind === 'tool-call') state.sawToolCall = true
     while (outbox.length > 0) yield outbox.shift()
   }
 
   sink.closeAll()
+  if (sink.brokenToolCall) state.brokenToolCall = true
   while (outbox.length > 0) yield outbox.shift()
   return { ...state, usage: state.usage ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0 } }
 }

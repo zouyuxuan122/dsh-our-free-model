@@ -143,6 +143,8 @@ window.__ModuleLoader__.load({
         'news.unread': '{n} 条未读',
         'news.allRead': '全部已读',
         'news.markRead': '标记已读',
+        'news.expand': '展开公告',
+        'news.collapse': '收起公告',
         'news.refresh': '检查新公告',
         'news.refreshing': '检查中…',
         'news.empty': '暂无公告。仓库主人推送的新公告会出现在这里。',
@@ -302,6 +304,8 @@ window.__ModuleLoader__.load({
         'news.unread': '{n} unread',
         'news.allRead': 'Mark all read',
         'news.markRead': 'Mark read',
+        'news.expand': 'Show announcements',
+        'news.collapse': 'Hide announcements',
         'news.refresh': 'Check for new announcements',
         'news.refreshing': 'Checking…',
         'news.empty': 'No announcements yet. Anything the owner pushes will appear here.',
@@ -1203,14 +1207,20 @@ window.__ModuleLoader__.load({
       const news = useAsync(() => api('/announcements'), [])
       const [busy, setBusy] = useState(false)
       const [osError, setOsError] = useState('')
+      // Collapsed by default: the header row carries the status, and the body
+      // opens only while there is something unread to read.
+      const [open, setOpen] = useState(false)
+      const items = news.data?.items ?? []
+      const unread = news.data?.unread ?? 0
+      useEffect(() => {
+        if (unread > 0) setOpen(true)
+      }, [unread])
       // Live refresh: the push subscription broadcasts to window on arrival.
       useEffect(() => {
         const handler = () => news.reload()
         window.addEventListener('ofm:announcements', handler)
         return () => window.removeEventListener('ofm:announcements', handler)
       }, [news.reload])
-      const items = news.data?.items ?? []
-      const unread = news.data?.unread ?? 0
       const notifyOs = news.data?.notifyOs === true
       const ack = async payload => {
         setBusy(true)
@@ -1235,21 +1245,23 @@ window.__ModuleLoader__.load({
           news.data?.error ? h('span', { className: 'ofm_pill' }, h('span', { className: 'ofm_dot warn' }), t('news.fetchFailed')) : null,
           h('span', { className: 'ofm_pill' }, `${t('news.lastFetch')}: ${ago(news.data?.fetchedAt, t.locale)}`),
           h('span', { className: 'spacer', style: { marginLeft: 'auto' } }),
+          h(Button, { kind: 'ghost', onClick: () => setOpen(value => !value) }, open ? t('news.collapse') : t('news.expand')),
           h(Button, { disabled: busy || news.status !== 'ready', onClick: refresh }, busy ? t('news.refreshing') : t('news.refresh'))),
-        h('div', { className: 'ofm_row' },
-          notifyOs
-            ? h('span', { className: 'ofm_pill' }, h('span', { className: 'ofm_dot ok' }), t('news.osOn'))
-            : h(Button, { onClick: enableOs }, t('news.osEnable')),
-          osError !== '' ? h('span', { className: 'ofm_note' }, osError)
-            : notifyOs ? null : h('span', { className: 'ofm_pill' }, h('span', { className: 'ofm_dot' }), t('news.osOff')),
-          unread > 0 ? h('span', { style: { marginLeft: 'auto' } }, h(Button, { kind: 'ghost', disabled: busy, onClick: () => ack({ all: true }) }, t('news.allRead'))) : null),
-        news.status === 'loading' && news.data === undefined ? h('p', { className: 'ofm_note' }, t('loading')) : null,
-        news.status === 'error' ? h('p', { className: 'ofm_note' }, news.error) : null,
-        news.status === 'ready' && items.length === 0 ? h('p', { className: 'ofm_note' }, t('news.empty'), ' ', h('span', { style: { color: 'var(--dsw-alias-label-tertiary)' } }, t('news.emptyHint'))) : null,
-        h('div', { className: 'ofm_news' }, items.map(item => h(NewsItem, {
-          key: item.id, item, t, locale: t.locale, busy,
-          onAck: () => ack({ id: item.id }),
-        }))))
+        open ? h(Fragment, null,
+          h('div', { className: 'ofm_row' },
+            notifyOs
+              ? h('span', { className: 'ofm_pill' }, h('span', { className: 'ofm_dot ok' }), t('news.osOn'))
+              : h(Button, { onClick: enableOs }, t('news.osEnable')),
+            osError !== '' ? h('span', { className: 'ofm_note' }, osError)
+              : notifyOs ? null : h('span', { className: 'ofm_pill' }, h('span', { className: 'ofm_dot' }), t('news.osOff')),
+            unread > 0 ? h('span', { style: { marginLeft: 'auto' } }, h(Button, { kind: 'ghost', disabled: busy, onClick: () => ack({ all: true }) }, t('news.allRead'))) : null),
+          news.status === 'loading' && news.data === undefined ? h('p', { className: 'ofm_note' }, t('loading')) : null,
+          news.status === 'error' ? h('p', { className: 'ofm_note' }, news.error) : null,
+          news.status === 'ready' && items.length === 0 ? h('p', { className: 'ofm_note' }, t('news.empty'), ' ', h('span', { style: { color: 'var(--dsw-alias-label-tertiary)' } }, t('news.emptyHint'))) : null,
+          h('div', { className: 'ofm_news' }, items.map(item => h(NewsItem, {
+            key: item.id, item, t, locale: t.locale, busy,
+            onAck: () => ack({ id: item.id }),
+          })))) : null)
     }
 
     function NewsItem(props) {

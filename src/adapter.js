@@ -200,6 +200,29 @@ export class FreeModelAdapter {
     try {
       const outcome = yield* readStream(channel.read(), wire, renameMap, () => Date.now())
       yield { type: 'usage', usage: outcome.usage }
+      // Two upstream pathologies the finish token alone cannot express:
+      //
+      // A truncated turn is reported by the gateway as finish "tool_calls" even
+      // when the ceiling cut the arguments mid-JSON (verified live 2026-09-25).
+      // Handing the harness a tool-calls finish makes it execute an
+      // unexecutable call, the tool errors, and the model retries into the same
+      // ceiling — the reported endless, very expensive turns. A max-tokens
+      // finish makes the assembler prune the call and ends the turn instead.
+      if (outcome.brokenToolCall === true) {
+        yield { type: 'finish', reason: { kind: 'max-tokens' } }
+        record(true, outcome.usage, (outcome.firstDeltaAt ?? started) - started, Date.now() - (outcome.firstDeltaAt ?? started), outcome.sawReasoning)
+        if (warnings.length > 0) this.deps.warn?.(`our-free-model: dropped unsupported content for ${entry.id}: ${warnings.join(', ')}`)
+        return
+      }
+      // A degenerate completion — a normal stop with zero blocks — would end
+      // the turn silently with nothing for the user or the loop to act on.
+      // Classifying it here is what makes the harness back off and retry.
+      if (outcome.sawText !== true && outcome.sawToolCall !== true && outcome.sawReasoning !== true
+        && finishReason(outcome.finish).kind === 'stop') {
+        yield { type: 'finish', reason: { kind: 'error', failure: { message: 'our free model returned an empty response', code: CODE.empty } } }
+        record(false, outcome.usage, undefined, 0)
+        return
+      }
       yield { type: 'finish', reason: finishReason(outcome.finish) }
       record(true, outcome.usage, (outcome.firstDeltaAt ?? started) - started, Date.now() - (outcome.firstDeltaAt ?? started), outcome.sawReasoning)
       if (warnings.length > 0) this.deps.warn?.(`our-free-model: dropped unsupported content for ${entry.id}: ${warnings.join(', ')}`)

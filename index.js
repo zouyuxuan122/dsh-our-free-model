@@ -402,6 +402,14 @@ export function apply(ctx, config) {
       handler(chunk)
       foldForwardOutcome(outcome, chunk)
     }
+    // A max-tokens finish means the adapter judged a tool call unexecutable
+    // (arguments cut mid-JSON); keep the OpenAI answer consistent with its
+    // finish_reason by not reporting the broken call alongside `length`.
+    if (outcome.truncated === true) {
+      outcome.toolCalls = outcome.toolCalls.filter(call => {
+        try { JSON.parse(call.arguments === '' ? '{}' : call.arguments); return true } catch { return false }
+      })
+    }
     return outcome
   }
 

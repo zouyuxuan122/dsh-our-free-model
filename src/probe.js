@@ -15,7 +15,7 @@
  */
 
 import { applyFingerprint, endpointFor, mintRequestId, sessionForConversation, wireFor } from './upstream.js'
-import { CODE, getJson, postStreamed } from './http.js'
+import { CODE, postStreamed } from './http.js'
 
 /** Public-echo sources, tried in order; any one answering is enough. */
 const ECHO_SOURCES = [
@@ -98,13 +98,42 @@ function buildPing(modelId, wire) {
   return { model: modelId, messages: [{ role: 'user', content: PING_PROMPT }], stream: true, max_tokens: 16 }
 }
 
+/**
+ * Map one probe failure onto a verdict.
+ *
+ * The line that matters is whether the gateway *named this model as something it
+ * will not route*. Only those readings come from the answer itself: a refusal
+ * whose message is about the model (`Model is unavailable`, `not supported`,
+ * `no such model`), or a status whose whole meaning is the identifier in the body
+ * we sent — 400 for a model it rejects, 404 for one it no longer has, 422 for a
+ * route that refuses the pair. Those read as unavailable and the picker drops the
+ * model.
+ *
+ * Everything else says nothing about the model and must not move it:
+ * - 5xx, including 503, is the gateway's own trouble. It is the single most
+ *   common thing an overloaded pooled account says, and this lane's own history
+ *   has it returning 5xx for reasons that had nothing to do with the model
+ *   (`src/effort.js` records an upstream 503 from an unknown request field).
+ * - 401/403/407 is the pooled credential, and 408/425/429 is capacity or
+ *   transport — the next window can answer.
+ * - no status at all (transport, abort, timeout, a stream that died before any
+ *   header) means no answer was received.
+ *
+ * The asymmetry is deliberate: a stale entry in the picker costs the user one
+ * failed turn they can retry, while a model that vanished on a hiccup costs the
+ * `reprobe`-then-wait cycle the user has no visibility into.
+ */
+const ROUTING_REFUSAL_STATUS = new Set([400, 404, 422])
+
 function stateOf(error) {
   switch (error?.code) {
     case CODE.region: return STATE.regionBlocked
     case CODE.quota: return STATE.throttled
     default: break
   }
-  if (error?.unavailable === true || /unavailable|not supported/i.test(String(error?.message))) return STATE.unavailable
+  const message = String(error?.message ?? '')
+  if (error?.unavailable === true || /unavailable|not supported|no such model|unknown model|invalid model/i.test(message)) return STATE.unavailable
+  if (Number.isInteger(error?.status) && ROUTING_REFUSAL_STATUS.has(error.status)) return STATE.unavailable
   return STATE.unknown
 }
 
@@ -132,16 +161,6 @@ export async function detectEgress({ signal, timeoutMs = 8000 } = {}) {
     }
   }
   return undefined
-}
-
-/**
- * Refresh the model listing from the gateway.
- * @returns {Promise<string[]>} ids, in upstream order
- */
-export async function fetchUpstreamIds({ attributionUserAgent, signal } = {}) {
-  const payload = await getJson('/zen/v1/models', { session: sessionForConversation('catalog:our-free-model'), requestId: mintRequestId(), attributionUserAgent, signal })
-  const rows = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload?.models) ? payload.models : []
-  return rows.map(row => (typeof row === 'string' ? row : row?.id)).filter(id => typeof id === 'string' && id !== '')
 }
 
 /**

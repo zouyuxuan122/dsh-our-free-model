@@ -14,11 +14,11 @@
  * Server-Sent-Events route, because the kernel has no notification service and
  * the settings page should not have to poll.
  *
- * Every harness facility is reached through `ctx` and declared in `inject`, so a
- * composition that omits one degrades that feature rather than failing the
- * plugin: no web server means no in-app dashboard, no timer means no background
- * re-probe, no attachments means image blocks fall back to the text projection
- * the runtime already performs.
+ * Every harness facility is reached through `ctx`, and only the one the plugin
+ * cannot exist without is declared in `inject`, so a composition that omits the
+ * rest degrades a feature rather than failing the plugin: no web server means no
+ * in-app dashboard, no attachments means image blocks fall back to the text
+ * projection the runtime already performs. See `inject` below.
  *
  * @module index.js
  */
@@ -28,13 +28,13 @@ import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { FreeModelAdapter, ROUTE_LABELS, ROUTE_MAIN, ROUTE_REGION } from './src/adapter.js'
 import { JsonStore, SETTINGS_INITIAL, STATS_INITIAL, STATS_VERSION, DATA_DIR_NAME, MIN_DECODE_MS, decodeWindow, migrateStats, pruneDays, recordUsage, resolveDshHome } from './src/store.js'
-import { buildCatalog, parseListing, UPSTREAM_MODELS_URL } from './src/catalog.js'
+import { buildCatalog, parseListing } from './src/catalog.js'
 import { STATE, detectEgress, probeCatalog } from './src/probe.js'
-import { generateKey, startForwardServer } from './src/forward.js'
-import { CODE, UpstreamError } from './src/http.js'
-import { applyFingerprint, baseModelId, endpointFor, mintRequestId, sessionForConversation, wireFor } from './src/upstream.js'
-import { budgetFor, DEFAULT_LEVEL } from './src/effort.js'
-import { toChatMessages, toToolDefs } from './src/messages.js'
+import { generateKey, startForwardServer, toOpenAiUsage } from './src/forward.js'
+import { CODE, UpstreamError, getJson } from './src/http.js'
+import { mintRequestId, sessionForConversation } from './src/upstream.js'
+import { DEFAULT_LEVEL, budgetLadder } from './src/effort.js'
+import { toToolDefs } from './src/messages.js'
 import { windowTokens } from './src/stream.js'
 import { AnnouncementFeed } from './src/feed.js'
 import { PluginUpdater, restoreBackup } from './src/updater.js'
@@ -59,14 +59,28 @@ function readPackageVersion() {
 }
 
 /**
- * `llm` is what the plugin exists for; `webServer` carries the settings page's
- * data routes; `timer` carries the availability re-probe loop. Cordis withholds
- * any service a plugin does not name here, so this list has to match the direct
- * property accesses in `apply`. Optional collaborators (attachments, connection)
- * are reached through `ctx.get()` instead, so their absence degrades one feature
- * rather than blocking activation.
+ * `llm` is what the plugin exists for, so it is the only hard requirement of the
+ * plugin itself.
+ *
+ * Cordis withholds from a context any service its fiber does not name in
+ * `inject`, and keeps that fiber PENDING while a named one is absent — which is
+ * how v1.2.1 stayed permanently inactive on a composition with no HTTP server,
+ * the surface issue #4 reported. So nothing else may be named here: a headless
+ * composition would rather serve models without a settings page than serve
+ * nothing.
+ *
+ * What that costs and what still works:
+ * - `webServer` — the in-app dashboard and the SSE push channel. Reached through
+ *   a nested `ctx.inject` fiber (see the browser-facing API section), which pends
+ *   on its own and never blocks the lane above.
+ * - `timer` (`ctx.interval`) — nothing. The background loops are plain unref'd
+ *   timers (see `every`), because reading a mixin off an undeclared service
+ *   throws rather than answering `undefined`.
+ * - `connection`, `attachments` — one feature each: the fence falls back to its
+ *   structural replica, image blocks to the text projection. Both are read with
+ *   `ctx.get()`, which is the opportunistic lookup that answers `undefined`.
  */
-export const inject = ['llm', 'webServer', 'timer']
+export const inject = ['llm']
 
 /** Static fallback catalog, so a cold start with no network still lists models. */
 const FALLBACK_CATALOG = buildCatalog([
@@ -211,16 +225,22 @@ export function apply(ctx, config) {
     { provider: ROUTE_MAIN, displayName: ROUTE_LABELS[ROUTE_MAIN], settingsNs: ctx.fiber?.entry?.options?.id ?? name, settingsPath: [] },
   ])
 
-  // Advertise a probe endpoint for the in-app "detect models" button.
+  // Advertise a probe endpoint for the in-app "detect models" button. It offers
+  // what the picker itself advertises — a model the gateway refuses to route at
+  // all must not be addable to a profile just because it still appears in the
+  // upstream listing.
   ctx.llm.registerModelDiscovery?.(ctx.fiber?.entry?.options?.id ?? name, async () => {
     await refreshCatalog({ probe: true })
-    return catalog.map(entry => ({
-      id: entry.id,
-      name: entry.name,
-      contextWindow: entry.contextWindow,
-      maxTokens: entry.maxOutput,
-      inputModalities: entry.vision ? ['text', 'image'] : ['text'],
-    }))
+    const advertised = new Set(Object.values(state().membership).flat())
+    return catalog
+      .filter(entry => advertised.has(entry.id))
+      .map(entry => ({
+        id: entry.id,
+        name: entry.name,
+        contextWindow: entry.contextWindow,
+        maxTokens: entry.maxOutput,
+        inputModalities: entry.vision ? ['text', 'image'] : ['text'],
+      }))
   })
 
   ctx.on?.('loader/volatile-update', () => {
@@ -250,22 +270,13 @@ export function apply(ctx, config) {
 
   async function fetchListing() {
     // Read straight from the listing path rather than the probe helper: a listing
-    // needs no session identity, and a failure should be a plain throw.
-    const response = await fetch(UPSTREAM_MODELS_URL, {
-      redirect: 'error',
-      headers: {
-        'authorization': 'Bearer public',
-        'user-agent': `${attributionUserAgent} opencode/1.18.31`,
-        'x-opencode-client': 'desktop',
-        'x-opencode-session': sessionForConversation('catalog:our-free-model'),
-        'x-opencode-request': mintRequestId(),
-        'x-opencode-project': 'global',
-        'accept': 'application/json',
-      },
-      signal: AbortSignal.timeout ? AbortSignal.timeout(20000) : undefined,
+    // needs no session identity, and a failure should be a plain throw. Through
+    // `getJson` so the base URL stays the one override every other request uses.
+    return await getJson('/zen/v1/models', {
+      session: sessionForConversation('catalog:our-free-model'),
+      requestId: mintRequestId(),
+      attributionUserAgent,
     })
-    if (!response.ok) throw new UpstreamError(`listing HTTP ${response.status}`, CODE.server, { status: response.status })
-    return await response.json()
   }
 
   async function refreshAvailability() {
@@ -274,6 +285,13 @@ export function apply(ctx, config) {
     }, 2)
     availability.update({ at: Date.now(), egress })
     availability.flush()
+    // Say it out loud when a round refuses everything: `computeMembership` keeps
+    // the roster advertised in that case, and without this line the log would
+    // read as a healthy probe while the gateway was turning every model down.
+    const verdicts = Object.values(results)
+    if (verdicts.length > 0 && verdicts.every(row => row.state === STATE.unavailable)) {
+      logger.warn?.(`our-free-model: the gateway refused all ${verdicts.length} models this round (${verdicts[0].detail ?? 'no detail'}); keeping them advertised`)
+    }
     emitTopology()
     return results
   }
@@ -380,7 +398,7 @@ export function apply(ctx, config) {
 
   function publicModelRows() {
     const membership = new Set(state().membership[ROUTE_MAIN] ?? [])
-    if (settings.get().exposeRegionModels === true) for (const id of state().membership[ROUTE_REGION] ?? []) membership.add(id)
+    if (settings.get().exposeRegionModels !== false) for (const id of state().membership[ROUTE_REGION] ?? []) membership.add(id)
     return catalog
       .filter(entry => membership.has(entry.id))
       .map(entry => ({
@@ -445,7 +463,32 @@ export function apply(ctx, config) {
   }
 
   // ── browser-facing API ──────────────────────────────────────────────────────
-  const connection = typeof ctx.get === 'function' ? ctx.get('connection') : undefined
+  /**
+   * Read a service the composition may or may not mount.
+   *
+   * `ctx.get` is cordis' opportunistic lookup: it answers `undefined` instead of
+   * throwing when the service is absent — and also while it is merely not
+   * provided yet, which matters because plugins load before the browser half has
+   * published anything. So a service read this way is a snapshot: `connection` is
+   * therefore resolved per request below, and `webServer` gets its own fiber (see
+   * the `ctx.inject` at the end of this section).
+   */
+  const optional = service => (typeof ctx.get === 'function' ? ctx.get(service) : undefined)
+  /**
+   * The trust fence's view of the connection service, looked up per request.
+   *
+   * The browser half publishes `connection` after plugins have loaded, so reading
+   * it once here would freeze in "absent" and leave every request on the replica
+   * fence for the life of the process. The getter answers `undefined` — not a
+   * no-op function — while the service is missing, which is what makes the fence
+   * fall through to its own structural check instead of reading as "admitted".
+   */
+  const fenceConnection = {
+    get admit() {
+      const current = optional('connection')
+      return current === undefined ? undefined : (req => current.admit(req))
+    },
+  }
   const api = createApiRoutes({
     settings, stats, availability, catalog: () => catalog, state,
     refreshCatalog, refreshAvailability, syncForward,
@@ -527,23 +570,33 @@ export function apply(ctx, config) {
     },
     hotReload: () => reloadFromDisk(),
     push,
-    connection,
+    connection: fenceConnection,
     logger,
   })
 
-  if (typeof ctx.webServer?.register === 'function') {
-    ctx.effect(() => ctx.webServer.register({ kind: 'prefix', path: '/api/our-free-model', handler: api }), 'our-free-model: api routes')
-    // The events stream is an exact route: exact dispatch outranks the prefix,
-    // so the hub's handler owns the socket while every other path still lands
-    // on the JSON API.
-    ctx.effect(() => ctx.webServer.register({ kind: 'exact', path: '/api/our-free-model/events', handler: eventsRoute }), 'our-free-model: events stream')
-  } else {
-    logger.warn?.('our-free-model: no web server in this composition; the settings page will have no data source')
-  }
+  // The dashboard half runs in its own fiber so that a composition without an
+  // HTTP server cannot take the model lane down with it.
+  //
+  // `ctx.inject(deps, callback)` is cordis' "run this once these services exist":
+  // the callback pends while `webServer` is absent *or merely not provided yet*,
+  // and is re-run if the service is replaced. That pending is the whole point —
+  // reading `ctx.get('webServer')` once at apply time answered `undefined` in the
+  // real web composition (plugins load before the browser half publishes it), the
+  // routes never registered, and the settings page had no data source while a web
+  // server was busy serving it.
+  ctx.inject(['webServer'], scoped => {
+    const server = scoped.webServer
+    scoped.effect(() => server.register({ kind: 'prefix', path: '/api/our-free-model', handler: api }), 'our-free-model: api routes')
+    // The events stream is an exact route: exact dispatch outranks the prefix, so
+    // the hub's handler owns the socket while every other path still lands on the
+    // JSON API.
+    scoped.effect(() => server.register({ kind: 'exact', path: '/api/our-free-model/events', handler: eventsRoute }), 'our-free-model: events stream')
+    logger.info?.('our-free-model: settings API mounted at /api/our-free-model')
+  })
 
   /** Adopt one request as a live push stream, after the trust fence. */
   function eventsRoute(req, res) {
-    const rejection = rejectionFor(req, connection)
+    const rejection = rejectionFor(req, fenceConnection)
     if (rejection !== undefined) {
       res.writeHead(rejection, { 'content-type': 'text/plain; charset=utf-8' })
       res.end(rejection === 401 ? 'unauthorized' : 'forbidden')
@@ -605,23 +658,50 @@ export function apply(ctx, config) {
     return () => clearTimeout(first)
   }, 'our-free-model: first feed poll')
 
-  const feedMinutes = Math.max(5, settings.get().feedPollMinutes ?? 30)
-  if (typeof ctx.interval === 'function') {
-    ctx.effect(() => ctx.interval(() => {
-      void feed.poll()
-      const hours = settings.get().updateCheckHours ?? 6
-      if (hours > 0) void updater.check().then(() => pushUpdate(false)).catch(() => {})
-    }, feedMinutes * 60_000), 'our-free-model: feed + update poll')
-    ctx.effect(() => ctx.interval(() => {
-      void (async () => {
-        await watchEgress()
-        await refreshCatalog({ probe: true })
-      })().catch(error => logger.warn?.(`our-free-model: periodic refresh failed (${error?.message ?? error})`))
-    }, Math.max(60, settings.get().probeIntervalMinutes ?? 15) * 60_000), 'our-free-model: probe loop')
-    ctx.effect(() => ctx.interval(() => {
-      void watchEgress().catch(() => {})
-    }, 120_000), 'our-free-model: egress watch')
+  /**
+   * Run one task every `ms` for as long as this generation lives.
+   *
+   * A plain unref'd timer chain, on purpose. `ctx.interval` is a mixin over the
+   * `timer` service, and reading it from a fiber that did not name `timer` in
+   * `inject` throws inside the real cordis proxy (`cannot get property "timer"
+   * without inject`) instead of answering `undefined` — that one read is what
+   * stopped the whole plugin from activating. `timer` is not worth declaring on a
+   * headless composition, and the mixin adds nothing here beyond `setTimeout` plus
+   * a disposer: it must not hold the process open, and `disposed` ends it when the
+   * fiber goes away. Without any loop the availability probe would run once at
+   * boot, so a model that throttled, recovered, or moved behind the region gate
+   * would keep the picker position it was first given.
+   */
+  function every(task, ms) {
+    let handle = setTimeout(function tick() {
+      if (disposed) return
+      task()
+      handle = setTimeout(tick, ms)
+      handle.unref?.()
+    }, ms)
+    handle.unref?.()
+    ctx.effect(() => () => clearTimeout(handle), 'our-free-model: interval')
   }
+
+  const feedMinutes = Math.max(5, settings.get().feedPollMinutes ?? 30)
+  every(() => {
+    void feed.poll()
+    const hours = settings.get().updateCheckHours ?? 6
+    if (hours > 0) void updater.check().then(() => pushUpdate(false)).catch(() => {})
+  }, feedMinutes * 60_000)
+  // The probe period is in minutes, and one minute is the floor — a value of 0 or
+  // a negative one would otherwise spin. This used to read `Math.max(60, …)`,
+  // which floored every interval below an hour *including the shipped default of
+  // 15*, so the number on the settings page was silently ignored.
+  every(() => {
+    void (async () => {
+      await watchEgress()
+      await refreshCatalog({ probe: true })
+    })().catch(error => logger.warn?.(`our-free-model: periodic refresh failed (${error?.message ?? error})`))
+  }, Math.max(1, settings.get().probeIntervalMinutes ?? 15) * 60_000)
+  every(() => {
+    void watchEgress().catch(() => {})
+  }, 120_000)
   // The first update check waits for the boot refresh to settle, then runs once
   // even when the periodic poll is disabled (hours === 0 means opt out fully).
   ctx.effect(() => {
@@ -649,22 +729,41 @@ export function apply(ctx, config) {
 /**
  * Which route advertises which model, given the last probe.
  *
- * Every model in the catalog stays callable on one of the two routes: the main
- * route carries whatever has not been refused for geography, including models a
- * probe could not reach this round — a transient failure should not make a
- * model vanish from the picker. Only region-gated models move to the dedicated
- * route, and only while the user wants them shown.
+ * Region-gated models move to their dedicated route, and only while the user
+ * wants them shown. Everything else sits on the main route, including models a
+ * probe could not reach this round — a call that never got an answer is not a
+ * verdict, and a flaky network must not empty the picker.
+ *
+ * A model the gateway named in its listing but refused to route at all is the
+ * exception: it cannot answer any prompt, so advertising it trades the user's
+ * turn for a guaranteed failure. Those come out of both routes until a later
+ * probe reverses the verdict, which the periodic re-probe does by itself if the
+ * lane brings the id back.
+ *
+ * A catalog entry with no verdict at all is normal, not an edge case: a fresh
+ * install has no probe history until the boot round lands (one ping per model,
+ * two at a time, each with a 45 second budget), and a model the listing just
+ * added has none until the next one does. Such an entry is advertised — not
+ * knowing is not the same as knowing it is refused.
+ *
+ * The one thing that may never happen is an empty result. Every model failing
+ * the same way means the lane or the client fingerprint is broken, not that the
+ * whole roster went away, and a picker with no models at all is worse than one
+ * with a stale entry — so a round that refused everything is ignored, geography
+ * grouping and all.
  */
 function computeMembership(catalog, availabilitySnapshot, settings) {
   const results = availabilitySnapshot?.results ?? {}
   const expose = settings?.exposeRegionModels !== false
+  const verdictOf = entry => results[entry.id]?.state
+  let usable = catalog.filter(entry => verdictOf(entry) !== STATE.unavailable)
+  if (catalog.length > 0 && usable.length === 0) usable = catalog
   const main = []
   const region = []
-  for (const entry of catalog) {
-    const result = results[entry.id]
-    if (result !== undefined && result.state === STATE.regionBlocked && expose) { region.push(entry.id); continue }
-    if (result !== undefined && result.state === STATE.regionBlocked) continue
-    main.push(entry.id)
+  for (const entry of usable) {
+    const verdict = verdictOf(entry)
+    if (verdict !== STATE.regionBlocked) main.push(entry.id)
+    else if (expose) region.push(entry.id)
   }
   const membership = {}
   if (main.length > 0) membership[ROUTE_MAIN] = main
@@ -788,10 +887,12 @@ function foldForwardOutcome(outcome, chunk) {
         if (existing === undefined) outcome.toolCalls.push({ slot: chunk.index, id: chunk.block.id, name: chunk.block.name, arguments: chunk.block.arguments })
       }
       break
-    case 'usage': outcome.usage = chunk.usage; break
+    case 'usage': outcome.usage = toOpenAiUsage(chunk.usage); break
     case 'finish':
       if (chunk.reason?.kind === 'max-tokens') outcome.truncated = true
-      if (chunk.reason?.kind === 'error') outcome.error = chunk.reason.failure?.message
+      // An aborted turn carries the same in-body nothing as an errored one; both
+      // are the caller's failure to report, not an empty completion.
+      if (chunk.reason?.kind === 'error' || chunk.reason?.kind === 'aborted') outcome.error = chunk.reason.failure?.message
       break
     default: break
   }
@@ -964,6 +1065,7 @@ function buildSummary(deps) {
   const forwardInfo = deps.forwardInfo()
   const update = deps.update.status()
   const feedView = deps.announcements.view()
+  const defaultMaxTokens = deps.settings.get().defaultMaxTokens
   return {
     catalog: state.catalog.map(entry => ({
       ...entry,
@@ -972,6 +1074,12 @@ function buildSummary(deps) {
       probedAt: snapshot.results?.[entry.id]?.at ?? 0,
       ttftMs: snapshot.results?.[entry.id]?.ttftMs,
       latencyMs: snapshot.results?.[entry.id]?.latencyMs,
+      // What each rung of the effort menu will really put on the wire for this
+      // model, so the page never shows a 32K "output ceiling" beside a call that
+      // was cut off at 8K. A model with no effort menu has no ladder to show.
+      ...(entry.reasoning === true ? { budgets: budgetLadder(entry, undefined, defaultMaxTokens) } : {}),
+      // `null` here is what the picker does not advertise; the roster still lists
+      // those models, because "the probe refused it" is the user's only evidence.
       route: (state.membership[ROUTE_MAIN] ?? []).includes(entry.id) ? ROUTE_MAIN
         : (state.membership[ROUTE_REGION] ?? []).includes(entry.id) ? ROUTE_REGION : null,
     })),

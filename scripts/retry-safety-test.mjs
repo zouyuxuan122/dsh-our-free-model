@@ -1,6 +1,6 @@
 /**
- * Proves every failure the adapter hands the harness survives the durable session
- * log's lossless-JSON rule.
+ * Proves every failure shape and every usage count the adapter hands the harness
+ * survives the durable session log's lossless-JSON rule.
  *
  * The harness writes the adapter's `finish.reason.failure` straight into an
  * `llm/retry` session event, and that append rejects Error instances, non-finite
@@ -107,7 +107,22 @@ const policyShapeOk = isLosslessJson({ ...policy, retryableCodes: [...policy.ret
   && Number.isFinite(firstDelay) && firstDelay > 0
 console.log(`${policyShapeOk ? 'ok   ' : 'FAIL '} retry policy schedules a finite delay: firstDelay=${Number.isFinite(firstDelay) ? Math.round(firstDelay) : 'NaN'}ms`)
 
-console.log(failed === 0 && policyShapeOk
+// The same rule covers the usage event the harness appends after a turn, and the
+// OpenAI `usage` object has no required details block: reading `cached_tokens`
+// off an absent one made `inputTokens` NaN on every call from a gateway that
+// omits the optional field.
+const { mapUsage } = await import('../src/stream.js')
+const bare = mapUsage({ prompt_tokens: 11, completion_tokens: 7 })
+const usageOk = isLosslessJson(bare) && bare?.inputTokens === 11 && bare?.outputTokens === 7
+  && bare.totalTokens === 18 && !('cacheReadTokens' in bare)
+console.log(`${usageOk ? 'ok   ' : 'FAIL '} a usage object with no details block stays finite: ${JSON.stringify(bare)}`)
+
+const cached = mapUsage({ prompt_tokens: 20, completion_tokens: 5, prompt_tokens_details: { cached_tokens: 12 } })
+const cachedOk = cached.inputTokens === 8 && cached.cacheReadTokens === 12 && cached.totalTokens === 25
+console.log(`${cachedOk ? 'ok   ' : 'FAIL '} a cache hit is taken out of the disjoint input count: ${JSON.stringify(cached)}`)
+
+const ok = failed === 0 && policyShapeOk && usageOk && cachedOk
+console.log(ok
   ? `\nretry-safety: all ${cases.length} failure shapes are durable-log safe`
-  : `\nretry-safety: ${failed + (policyShapeOk ? 0 : 1)} failure(s)`)
-process.exit(failed === 0 && policyShapeOk ? 0 : 1)
+  : `\nretry-safety: ${failed + (policyShapeOk ? 0 : 1) + (usageOk ? 0 : 1) + (cachedOk ? 0 : 1)} failure(s)`)
+process.exit(ok ? 0 : 1)

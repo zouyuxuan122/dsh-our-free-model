@@ -18,17 +18,61 @@
  * level shortens both — that is the only modulation this lane offers, and it is
  * why the levels are stated as token budgets rather than as vague adjectives.
  *
+ * A model whose thinking cannot be switched off pays for it out of the same
+ * ceiling before the answer starts, so every rung of its ladder is doubled: one
+ * rung then leaves the answer about as much room as it has on a model that can
+ * think nothing at all. Measured on `mimo-v2.6-flash-free` over the 92 calls of
+ * one day: 82% of the output tokens were reasoning, so the un-doubled 8192
+ * ceiling left roughly 1500 for the answer and a long turn ended in `length`
+ * about every third request.
+ *
  * @module src/effort.js
  */
 
 /** Ordered for display: the array order is the picker's order. */
 export const LEVELS = [
-  { id: 'light', name: 'Light', zh: '精简', ceiling: 2048, description: 'A 2K ceiling shared by thinking and the answer: terse deliberation.' },
-  { id: 'balanced', name: 'Balanced', zh: '均衡', ceiling: 8192, description: 'An 8K ceiling, enough to reason through a normal turn.' },
-  { id: 'deep', name: 'Deep', zh: '深思', ceiling: undefined, description: 'The model full output capacity, with extended deliberation.' },
+  { id: 'light', name: 'Light', zh: '精简', ceiling: 2048, hint: 'terse deliberation, the fastest answer here.' },
+  { id: 'balanced', name: 'Balanced', zh: '均衡', ceiling: 8192, hint: 'enough to reason through a normal turn.' },
+  { id: 'deep', name: 'Deep', zh: '深思', ceiling: undefined, hint: 'the model\'s full output capacity, extended deliberation.' },
 ]
 
 export const DEFAULT_LEVEL = 'balanced'
+
+/** Rungs of a model that must think are widened by this factor; see the module note. */
+export const ALWAYS_THINKING_FACTOR = 2
+
+/** Does this model expose an effort menu at all? */
+export function supportsEffort(model) {
+  return model?.reasoning === true
+}
+
+/**
+ * The rung in force for one call, resolved the same way for the budget sent
+ * upstream and the effort recorded against it.
+ *
+ * A model with no effort menu has no rung: its whole output window belongs to the
+ * answer, and a level inherited from elsewhere must not shrink it. A model with a
+ * menu that the caller did not answer with a level still gets the menu's default.
+ * The two each failed differently before: a no-menu model inherited `balanced`
+ * and had its window cut by a rung it never offered, while a menu model with no
+ * rung sent the full capacity and *logged* the default — so the dashboard showed
+ * 均衡 next to a 32K generation that 均衡 had never promised.
+ *
+ * @param {string|undefined} level - effort id from the harness, when it sent one
+ * @param {object} model - catalog entry
+ * @returns {object|undefined} the declared level, or undefined when none applies
+ */
+export function resolveLevel(level, model) {
+  if (!supportsEffort(model)) return undefined
+  return LEVELS.find(candidate => candidate.id === level)
+    ?? LEVELS.find(candidate => candidate.id === DEFAULT_LEVEL)
+}
+
+/** The ceiling one rung carries on one model, before capacity is applied. */
+function ceilingOf(entry, model) {
+  if (entry === undefined || entry.ceiling === undefined) return undefined
+  return model?.canDisableThinking === false ? entry.ceiling * ALWAYS_THINKING_FACTOR : entry.ceiling
+}
 
 /**
  * Resolve the generation ceiling for one level against one model.
@@ -39,7 +83,7 @@ export const DEFAULT_LEVEL = 'balanced'
  *
  * @param {string|undefined} level - the effort id the harness selected
  * @param {object} model - catalog entry, supplying `maxOutput`
- * @param {number|undefined} requested - the session maxTokens, when it set one
+ * @param {number|undefined} requested - the session's maxTokens, when it set one
  * @param {number|undefined} fallback - the plugin default ceiling
  * @returns {number} tokens
  */
@@ -49,25 +93,58 @@ export function budgetFor(level, model, requested, fallback) {
     requested ?? Number.POSITIVE_INFINITY,
     fallback ?? Number.POSITIVE_INFINITY,
   )
-  const entry = LEVELS.find(candidate => candidate.id === level)
-  if (entry === undefined || entry.ceiling === undefined) return Math.max(MIN_BUDGET, Math.trunc(capacity))
-  return Math.max(MIN_BUDGET, Math.trunc(Math.min(entry.ceiling, capacity)))
+  const ceiling = ceilingOf(resolveLevel(level, model), model)
+  if (ceiling === undefined) return Math.max(MIN_BUDGET, Math.trunc(capacity))
+  return Math.max(MIN_BUDGET, Math.trunc(Math.min(ceiling, capacity)))
 }
 
 /** Below this the answer itself cannot land, so no level is allowed to go. */
-const MIN_BUDGET = 512
+export const MIN_BUDGET = 512
 
-/** Does this model expose an effort menu at all? */
-export function supportsEffort(model) {
-  return model?.reasoning === true
+/**
+ * The whole ladder as it applies to one model right now, for anything that has
+ * to show the user the number that will actually go out on the wire.
+ *
+ * @param {object} model - catalog entry
+ * @param {number|undefined} requested - the session's maxTokens, when it set one
+ * @param {number|undefined} fallback - the plugin default ceiling
+ * @returns {Array<{id: string, name: string, tokens: number, isDefault: boolean}>}
+ */
+export function budgetLadder(model, requested, fallback) {
+  return LEVELS.map(entry => ({
+    id: entry.id,
+    name: entry.name,
+    tokens: budgetFor(entry.id, model, requested, fallback),
+    isDefault: entry.id === DEFAULT_LEVEL,
+  }))
 }
 
-/** The declared effort list for one model, in picker order. */
-export function effortsFor(model) {
+/**
+ * The declared effort list for one model, in picker order.
+ *
+ * The description is generated from the same `budgetFor` call that will decide
+ * the request, not written next to it. A rung that advertises 8K while the plugin
+ * sends 16 384 on a thinking-always-on model is the same defect issue #2 reported
+ * for the settings page — a number the user reads and the wire does not honour —
+ * so this cannot carry a per-level constant.
+ *
+ * @param {object} model - catalog entry
+ * @param {number|undefined} requested - the session's maxTokens, when it set one
+ * @param {number|undefined} fallback - the plugin default ceiling
+ * @returns {Array<{id:string, name:string, description:string}>|undefined}
+ */
+export function effortsFor(model, requested, fallback) {
   if (!supportsEffort(model)) return undefined
-  return LEVELS.map(level => ({
-    id: level.id,
-    name: level.name,
-    ...level.description === undefined ? {} : { description: level.description },
+  return budgetLadder(model, requested, fallback).map(row => ({
+    id: row.id,
+    name: row.name,
+    description: `${kilos(row.tokens)} output ceiling, shared by thinking and the answer`
+      + (model.canDisableThinking === false ? ' (thinking cannot be switched off on this model)' : '')
+      + `: ${LEVELS.find(level => level.id === row.id)?.hint ?? ''}`,
   }))
+}
+
+/** 16384 -> `16 K`, the spelling the settings page and the README both use. */
+function kilos(tokens) {
+  return `${Math.round(tokens / 1024)} K`
 }

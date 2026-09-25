@@ -59,5 +59,24 @@ check('no connection service means fence only', () => {
   assert.equal(rejectionFor(req({ host: 'evil.example' }), undefined), 403)
 })
 
+// What the plugin hands the fence is not the service but a view of it, because
+// the composition may publish `connection` long after plugins have loaded — and
+// reading it once at apply time froze in "absent" for the life of the process.
+// The shape is only safe if a getter with nothing behind it answers `undefined`
+// rather than a silent `admit`: an `admit` that exists but says nothing reads to
+// trust.js as "admitted", which would switch the fence off entirely.
+check('the plugin’s late-binding fence view is not a pass', () => {
+  const view = service => ({ get admit() { return service === undefined ? undefined : (req => service.admit(req)) } })
+  assert.equal(rejectionFor(req({ host: 'evil.example' }), view(undefined)), 403)
+  assert.equal(rejectionFor(req({ host: '127.0.0.1:8080' }), view(undefined)), undefined)
+})
+check('and it consults the service from the moment it appears', () => {
+  let service
+  const view = { get admit() { return service === undefined ? undefined : (req => service.admit(req)) } }
+  assert.equal(rejectionFor(req({ host: 'evil.example' }), view), 403)
+  service = { admit: () => ({ rejection: 401 }) }
+  assert.equal(rejectionFor(req({ host: 'evil.example' }), view), 401)
+})
+
 if (failures === 0) console.log('trust-test: OK')
 else { console.error(`trust-test: ${failures} failure(s)`); process.exit(1) }

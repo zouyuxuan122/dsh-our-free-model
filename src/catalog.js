@@ -13,8 +13,6 @@
 
 import { baseModelId, isResponsesModel } from './upstream.js'
 
-export const UPSTREAM_MODELS_URL = 'https://opencode.ai/zen/v1/models'
-
 /** Ids that are free-tier without carrying the `-free` suffix. */
 const ALWAYS_FREE = new Set(['union-alpha', 'space-bunny-free'])
 

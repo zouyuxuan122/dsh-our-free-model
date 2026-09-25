@@ -35,11 +35,13 @@
 
 - **装完即用，没有配置环节**——不需要账号、不需要 Key、不需要去哪个后台开配额。
 - **清单跟随上游**——模型集合、上下文长度与能力每次刷新重新拉取，不是写死在插件里的一份快照。
-- **所有模型保持可达**——探测失败或暂时不可用的模型不再从选择器消失；只有地区门拦截的模型单独归到 `region-limited` 分组。
+- **选择器只给真能用的模型**——上游清单点名、但网关明确拒绝路由的模型（回 `Model is unavailable`、404 找不到这个 id）会从下拉框里移除，只在设置页留痕并写清拒因；网关自己的毛病（5xx）、配额（429）、超时断网这些**不是对模型的判定**，一律保持可达；地区门拦截的单独归到 `region-limited` 分组。整轮全部被拒时一律保留，绝不让选择器变空。
 - **公告中心 + 实时推送**——仓库主人在仓库里编辑一份 JSON 并推送，所有安装最迟在一个轮询周期内收到；内容是白名单约束下的 HTML，支持图文排版；`urgent` 级别直接全屏弹窗；可选系统级通知。
 - **应用内升级**——设置页一键升级：下载 → SHA-256 校验 → 备份 → 原子替换 → 校验回读 → 热重载，任一步失败自动回滚到上一个版本。
 - **热重载**——升级与代码更新即时生效，不需要重启应用；也可在设置页手动触发，或开启文件监视自动重载。
-- **思考强度真的生效**——`Light / Balanced / Deep` 对应输出 token 预算 2 048 / 8 192 / 模型上限，且逐次调用留痕。它不是把一个 effort 字符串丢给上游然后假装有用（原因见[为什么用预算而不是 reasoning_effort](#为什么用预算而不是-reasoning_effort)）。
+- **流式响应认出 body 而不是认出 header**——网关在高负载下会用 `application/json` 的 content-type 回一整套 SSE 帧，插件按 body 的形状判定并把已嗅探的字节重新喂回流，既不会整轮报错，也不会因为一个 header 说谎就把能用的模型判成不可用。
+- **思考强度真的生效**——`Light / Balanced / Deep` 对应输出 token 预算 2 048 / 8 192 / 模型上限，且逐次调用留痕。思考关不掉的模型（MiMo V2.6 这类）三档整体翻倍为 4 096 / 16 384 / 模型上限，因为思考与正文抢的是同一份额度；设置页每张模型卡都直接印出这一档实际会下发的上限。它不是把一个 effort 字符串丢给上游然后假装有用（原因见[为什么用预算而不是 reasoning_effort](#为什么用预算而不是-reasoning_effort)）。
+- **无浏览器界面也能跑**——插件只把 `llm` 当作硬依赖，没有 web server 的 composition（`dsh-tui` 这类）里照样启动、照样出模型；看板半身挂在一条自己的 fiber 上，等 `webServer` 出现再挂载，所以既不会把模型车道拖下水，也不会因为插件先于 web 服务加载就永远丢掉设置页。
 - **用量看板，全部留在本机**——Token 热力图、总量曲线（可看总计或单个模型）、输出速度与首字延迟逐次采样。不上传任何东西。
 - **OpenAI 兼容转发端口**——本机其它工具用一个 base URL + Key 就能调用这些模型。
 - **接口有鉴权围栏**——插件的 HTTP 路由优先级高于内核 `/api`，因此自带与内核一致的信任检查（优先复用 composition 的 connection 服务，缺失时退回结构化围栏）。
@@ -53,9 +55,13 @@
 | `Our Free Model` | 当前网络出口可直接使用的模型 |
 | `Our Free Model · region-limited` | 上游对该地区不放行的模型，保留可见但单独隔离 |
 
+被判定为「点名但不路由」的模型不出现在任何分组里——它们只在设置页的**不在选择器中**分组留痕，
+带上拒因与探测时间，某一次探测重新通过后会自动回到选择器。
+
 **设置页 `设置 → Our Free Model`**，六个分区：
 
-1. **模型清单**——每个模型的可用性、视觉还是纯文本、上下文窗口、最长输出、实测首字延迟，以及一次单调用基准测试按钮。
+1. **模型清单**——每个模型的可用性、视觉还是纯文本、上下文窗口、最长输出、各思考档位实际下发的
+   输出上限、实测首字延迟，以及一次单调用基准测试按钮。
 2. **公告中心**——仓库主人推送的公告流：未读计数、紧急徽章、单条/全部已读、检查新公告按钮、系统通知开关。公告正文按白名单渲染 HTML。
 3. **用量看板**——总览计数、17 周 Token 热力图、总量曲线（Token / 请求数切换，总计与单模型切换）、速度迷你图、按模型汇总表。
 4. **本地转发**——开关、监听地址与端口、复制 base URL、显示 / 复制 / 轮换 API Key，并给出一条可直接跑的 `curl` 示例。
@@ -138,7 +144,9 @@ del "%DSH_HOME%\profiles\web\pnpm-lock.yaml"
 **选模型**：打开输入框的模型选择器，选 `Our Free Model` 分组下的任意模型。选择按会话持久。
 
 **调思考强度**：同一菜单里的 `Effort`，三档 `Light / Balanced / Deep`。档位越高，思考占用的
-输出预算越多；上限是**强制下发**的，所以差异可测量，不是装饰。
+输出预算越多；上限是**强制下发**的，所以差异可测量，不是装饰。它是思考与可见回答**共用**的一
+份额度，所以思考关不掉的模型会把三档整体抬高（`设置 → Our Free Model` 的模型卡上写着每一档
+的实际数字）。如果觉得回答被截断，先换 `Deep`，或调高设置里的单次输出上限。
 
 **给其它本地工具用**：`设置 → Our Free Model → 本地转发`，启用后复制 base URL 并生成 Key。支持：
 
@@ -190,8 +198,14 @@ POST /v1/responses
 # 1. 修改 package.json 的 version
 # 2. 重新生成清单（把每个发布文件的字节数与 SHA-256 写进 feed/manifest.json）
 node scripts/build-manifest.mjs
-# 3. 提交并推送
+# 3. 确认清单与实物一致（不一致就非零退出；已接进 npm test）
+node scripts/build-manifest.mjs --check
+# 4. 提交并推送
 ```
+
+第 2 步不是可选项：清单是发布者对每个文件的**字节数与 SHA-256 的承诺**，改了发布文
+件却没重跑，客户端就会下到新文件、拿旧哈希去校验，校验机制会（正确地）拒绝安装——于
+是这一版的一键升级对所有旧版本用户都失败。`--check` 就是让这种事在提交前失败。
 
 已安装的插件会按 `updateCheckHours`（默认 6 小时）自动发现新版本并推送通知；
 用户确认后下载、校验、备份、替换、热重载全部在应用内完成。清单会校验每个文件的
@@ -250,7 +264,7 @@ client.js       浏览器半身：手写 ModuleLoader bundle，无构建步骤
 反复采样，思考 token 数量在统计上无法区分。做一个不起作用的控件比不做更糟，
 所以思考强度实现为**硬性输出 token 上限**，它确实会约束——留痕的思考 token 随档位单调上升。
 
-### 两个真实浪费过调试时间的内核行为
+### 三个真实浪费过调试时间的内核行为
 
 这里摘出来是因为任何写 provider 插件的人都会踩：
 
@@ -261,6 +275,22 @@ client.js       浏览器半身：手写 ModuleLoader bundle，无构建步骤
 2. **一次被打断的工具调用会永久毒化该会话**。没有对应结果的工具调用重放时上游回
    `400 invalid_request_error`，此后该会话里**每一次**请求都失败。本插件在发送前修复配对，
    三种线协议共用同一处修复。
+3. **没在 `inject` 里声明的服务，属性直读是抛错不是 `undefined`；而 `ctx.get()` 在服务
+   "还没被 provide 出来"时返回 `undefined`。** 这两条本轮各咬了一口：把 `inject` 缩到只剩
+   `llm` 之后 `typeof ctx.interval === 'function'` 直接抛 `cannot get property "timer"
+   without inject`（`ctx.interval` 是 `timer` 服务上的 mixin），插件在**所有** composition
+   里都不再激活；改用 `ctx.get('webServer')` 之后它返回 `undefined`——不是因为没有 web
+   server，而是因为插件比 web 半身先加载——于是设置页路由一条都没挂上。正解是
+   `ctx.inject(deps, callback)`：为需要的服务开一条自己的 fiber，让它去待命，
+   而不是在加载的那一瞬间猜一次。
+
+### 为什么按 body 的形状而不是 `Content-Type` 读响应
+
+这条车道会在高负载下用 200 + `application/json` 回一整套 SSE 帧。旧写法信 header，
+于是 `await response.text()` 把整条流读成字符串、`JSON.parse` 失败、整轮报废——而那个
+错误对象带着 `status: 200`，还会让可用性探测把这个**完全能用**的模型判成"不可路由"，
+从下拉框里消失一轮。现在读法是先嗅探首块（≤4 KB）按形状分流，再把已经读到的字节
+重新喂回流里，实时性一点不损失；`src/http.js` 的 `sniffBody` 是唯一判据。
 
 ### 为什么速度那一栏会显示 `—`
 
@@ -278,15 +308,39 @@ reasoning token 从分子里剔掉，`decodeWindow()` 拒掉短到没法计时�
 
 ## 验收情况
 
-在两套内核上、Windows 环境、对真实上游实测；本轮（v1.1.2）的全部新能力都做了
-**实际操作验证**，包括浏览器与 DSHEAC AIO 桌面窗口内的逐项点击：
+在 Windows 环境、对真实上游实测。本节按轮次记录，并写明每一行的验证方式——只有标着
+「真实上游」与「实机点击」的那些才是用户在界面上会看到的行为。
+
+### 本轮：v1.2.2（对应 issue #1–#4、#6）
+
+每一行都写明**用什么方式验的**：`离线假内核`不出网、`真实上游`是插件真打网关但跑在
+手搭的 cordis context 上、`真实内核`才是把插件装进 dsh 里启动。这三者的差别本轮吃过一次
+教训——见最后一行。
+
+| 项目 | 方式 | 结果 |
+| --- | --- | --- |
+| 发布清单与实物一致 | 离线 `build-manifest.mjs --check` | 26 个发布文件全部一致。改动前线上 main 的 1.2.1 清单已漂移 **6 个文件**（`index.js`、`README.md`、`README_EN.md`、`src/catalog.js`、`src/store.js`、`src/upstream.js`），比 issue #1 报的 2 个更多——即提出 issue 之后又复发了一次。现已随版本重生成，并且 `--check` 进了 `npm test` 和 CI |
+| 离线套件 | `npm test`（13 个套件） | 13/13 通过；不出网、不花免费额度 |
+| 新测试真的能咬住回归 | 逐条把旧行为改回去再跑 | `computeMembership` 的未判定模型：改回旧写法 → picker 报 `Cannot read properties of undefined (reading 'state')`（2 条检查失败）；`postStreamed` 的 Content-Type 判定：改回旧写法 → sniff 7 条检查失败。恢复后各自全绿 |
+| 探测判定与选择器广播 | 真实上游 `host-selftest.mjs` | 清单 10 个模型 → 主分组 7 + `region-limited` 2，转发端口 `/v1/models` 同步 9 个；`deepseek-v4-flash-free`（`Model is unavailable`）移出下拉框并在设置页保留拒因；5xx/429/断网一律保持可达（issue #3 的判定不再误伤抖动） |
+| 未判定模型不再致命 | 离线假内核 `picker-test.mjs` | 清单新增一个模型、它的探测被测试按住时，`listModels` 与 `/summary` 都正常返回，该模型 `availability=unknown` 且照常广播 |
+| 思考档位仍然强制 | 真实上游，MiMo V2.6 Flash | `light` 现在发 4096：同一 prompt 下 2 980 tokens 正常 `stop`；改动前 `light`=2048 在同一个 prompt 上以 `length` 收尾 |
+| 长回答不再被截断 | 真实上游 `probes/long-answer.mjs` | `balanced` 实发 `max_tokens=16384`，一次请求 10 164 output tokens（19 914 字符、194 秒）后 `finish=stop`；同样的请求落在旧的 8192 档上必然以 `length` 结束——就是 issue #2 报的现象。设置页模型卡印出每一档真实数字（`默认档上限 16K`，已在浏览器里读到） |
+| SSE 帧不再被 header 出卖（issue #6） | 离线假网关 `sniff-test.mjs` | 200 + `application/json` + 体内是 SSE 帧：正常吐 token，不报错；跨 chunk 截断的中文字符、超过 4 K 嗅探窗口的 400 帧长流、单包 JSON、空 body、HTML 杂七杂八全部按形状分流。同一场景在旧代码上会让探测把可用模型判成 `unavailable` |
+| 无 web server 的 composition | 离线假内核 `scripts/tui-test.mjs` | 只挂 `llm` 时 `apply()` 不抛错、注册两条路由、跑完一轮流式对话、转发端口起来并拒掉无 Key 请求；后台循环走普通 unref 定时器。看板半身停在待命状态，`webServer` 一出现就自己挂上两条路由。**真实 dsh-tui 尚未实机验证**：本机两套内核（dsh 0.1.7 源码构建、AIO 6.9.3）都不含 tui profile |
+| 插件在真实内核里真的能装 | **真实内核** `dsh` 0.1.7-rc.1 web，端口 3099 | 启动无 `did not activate`；`/api/our-free-model/summary` 200（10 个模型：6 available、2 region-blocked、1 unknown、1 unavailable）、`/events` 起来推 hello；浏览器里进 `设置 → Our Free Model` 逐项读到 10 张模型卡、`不在选择器中` 分组、`思考不可关` 与 `默认档上限 16K` 标签，控制台零报错。本轮最初版本在这一步是**失败**的：`inject` 只留 `llm` 之后读 `ctx.interval` 抛 `cannot get property "timer" without inject`，插件在所有 composition 里都不再激活 |
+| usage 计数干净 | 离线 `retry-safety-test.mjs` | 没有 `prompt_tokens_details` 的 usage 不再把 `inputTokens` 算成 `NaN`；转发端口按 `prompt_tokens/completion_tokens` 回报，被网关拒绝的转发请求返回错误而不是空的 200 |
+
+### 上一轮：v1.1.2（公告、升级、热重载与信任围栏）
+
+全部新能力都做了**实际操作验证**，包括浏览器与 DSHEAC AIO 桌面窗口内的逐项点击：
 
 | 项目 | 结果 |
 | --- | --- |
 | `dsh` 0.1.7-rc.1（源码构建） | 启动无报错；选择器两个分组正确；多轮工具调用完成 |
 | `dsh` 0.1.5-rc.2（DSHEAC AIO 6.9.3 内核） | 启动无报错；与已装的其它第三方插件并存 |
 | EAC 启动闸门 | 安装时与**应用内升级之后**各跑一次：`compatible` / `PASS` |
-| 模型可调用性 | 10 个清单模型全部可达（含探测失败/暂不可用者）；real chat、多轮工具、视觉输入在两套内核通过 |
+| 模型可调用性 | 10 个清单模型全部可达（该轮行为：连探测失败/暂不可用者也保留在选择器里；v1.2.2 起不再广播判定不可用的模型）；real chat、多轮工具、视觉输入在两套内核通过 |
 | 真实 harness 对话 | dsh web 与 AIO 桌面端各自完成一轮真实对话并收到回复 |
 | 公告 feed | 本地"仓库服务器"上推送新公告 → 运行中的两端在一个轮询周期内到达 |
 | 公告中心 UI | 4 条公告渲染（粗体/代码/链接/列表）、紧急红色徽章、未读点、单条/全部已读 |
@@ -324,24 +378,31 @@ Tauri 通知通道存在，纯浏览器路径可用，被拒时设置页如实�
 ## 开发
 
 ```bash
+npm test                          # 下面全部离线套件 + 清单一致性检查，一条命令
 node scripts/client-lint.mjs        # 浏览器半身：文案键与样式键双向覆盖、bundle 可执行
-node scripts/retry-safety-test.mjs  # 交给内核的失败对象与退避策略必须可持久化
+node scripts/retry-safety-test.mjs  # 交给内核的失败对象、退避策略与 usage 计数必须可持久化
 node scripts/speed-stat-test.mjs    # 没有任何一次调用能被平均成假的 tok/s
 node scripts/sanitize-test.mjs      # 公告 HTML 白名单渲染器：XSS 语料必须全部被丢弃
 node scripts/trust-test.mjs         # 插件路由的请求信任围栏
 node scripts/feed-test.mjs          # 公告 feed：解析、故障转移、缓存、到达检测（本地 HTTP 服务器）
 node scripts/updater-test.mjs       # 应用内升级：清单校验、SHA-256、备份/回滚（本地 HTTP 服务器）
+node scripts/effort-test.mjs        # 思考档位 = 真正下发的 max_tokens，且与留痕的档位一致
+node scripts/sniff-test.mjs         # 200 响应按 body 形状分流：SSE 帧、单包 JSON、空 body、跨 chunk 多字节
+node scripts/picker-test.mjs        # 选择器只广播真能用的模型，且永不广播空集合
+node scripts/tui-test.mjs           # 没有 web server 的 composition 里插件照样启动并出模型
 node scripts/host-selftest.mjs      # Host 半身端到端，会真实出网
 node scripts/build-manifest.mjs     # 发布：重新生成 feed/manifest.json（发布文件哈希清单）
 ```
 
 `scripts/probes/` 是逆向过程中的一次性取证脚本——能力矩阵、地区门、
 `reasoning_effort` 空操作采样、预算方言、悬空工具调用、工具名字符集规则、
-原始读包时刻（`batch-delivery`）、逐帧到达与 usage 对照（`decode-window`）。
-其中五个跑的是本插件自己的代码，从仓库根目录就能执行
+原始读包时刻（`batch-delivery`）、逐帧到达与 usage 对照（`decode-window`）、
+长回答会不会被额度截断（`long-answer`）。
+其中六个跑的是本插件自己的代码，从仓库根目录就能执行
 （`node scripts/probes/pairing-repair.mjs`）；其余借助一个第三方 SSE 客户端直连上游，
 模块路径写成了那个仓库的样子，所以只作为取证记录保留，不能当测试套件用。
-它们都没有接进 `npm test`——本来也没有安装步骤可以接入。
+它们都没有接进 `npm test`——那是取证记录，不是套件；`npm test` 跑的是上面这些不需要
+出网、不花免费额度的离线检查。
 
 需要 Node `^22.19.0 || >=24.0.0`。无安装步骤、无依赖。
 

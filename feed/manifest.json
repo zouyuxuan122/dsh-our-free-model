@@ -1,13 +1,13 @@
 {
-  "version": "1.2.1",
+  "version": "1.2.2",
   "base": "../",
-  "publishedAt": "2026-09-25T03:30:21.625Z",
-  "notes": "修复：模型输出预算截断工具调用时被误判为可执行调用，导致反复重试的死循环与超慢回合；网关返回空响应现在会自动重试；无 id 的工具调用自动补齐；设置页公告默认折叠，仅有未读时自动展开。",
+  "publishedAt": "2026-09-25T18:43:44.899Z",
+  "notes": "修复：应用内升级（1.2.1 的清单与实际文件不一致，旧版本点一键升级必然在校验阶段失败）；思考关不掉的模型三档预算翻倍（4096/16384/上限），长回答不再频繁被截断；探测判定不可用的模型不再出现在模型选择器与模型探测结果里；只声明 llm 依赖，没有 web server 的 composition（dsh-tui）也能加载；转发端口按 OpenAI 字段回报 usage，被拒绝的回合不再返回空的 200。",
   "files": [
     {
       "path": "client.js",
-      "size": 103138,
-      "sha256": "1ab7fb690c060031783a06e5dc4755686378f5ad20c79356b5ba1623809bd23a"
+      "size": 105531,
+      "sha256": "f0186fc4b7ecfaf082287e3eced22aad168dd053b89eade403ee215141b59124"
     },
     {
       "path": "cordis.patch.yml",
@@ -21,8 +21,8 @@
     },
     {
       "path": "index.js",
-      "size": 48253,
-      "sha256": "cef4400685cbe8f3909a00ad77ed4da59cc97860bf22b32f803a489aa920d741"
+      "size": 52794,
+      "sha256": "a8a613b8884d3f18182839a05876a110eb6465930e095fac51b01a7a54f77319"
     },
     {
       "path": "LICENSE",
@@ -41,28 +41,28 @@
     },
     {
       "path": "package.json",
-      "size": 1144,
-      "sha256": "f73dcbdb73fb1f1b7f0294ad52680f18f40c9b94faa9102e0a9a3bdf0607fc90"
+      "size": 1370,
+      "sha256": "c2f36f5d3bbe2e2c974684f0ceea02306bcd5b9763083d1fd755710e69570e97"
     },
     {
       "path": "README_EN.md",
-      "size": 24279,
-      "sha256": "5898abe270cef4e913bcc8dc68eda30d46319ba90395711cbbb4ec4b0c45e5ce"
+      "size": 34295,
+      "sha256": "fd9f23c90ac01923e620b6473fdbc79f2a9ee5f65cce361bed65b4a6c0fc3769"
     },
     {
       "path": "README.md",
-      "size": 24473,
-      "sha256": "4f6c006bb69a0e3ddfef3325710242ff3f3217851f907c84659cfeb1411d760b"
+      "size": 33774,
+      "sha256": "9c4ed71e4b249f65d7ec61338850efe38a44c28209f5bbee9d68ae82b1b6bae6"
     },
     {
       "path": "src/adapter.js",
-      "size": 13514,
-      "sha256": "89ec3f0476c0915528abb3812a007cf3e50f00de8f31e56329f3631093190b18"
+      "size": 14043,
+      "sha256": "b9b8fc1a12a843a08994de4e081f66d11beabec746481b8ecaed7195765ec43b"
     },
     {
       "path": "src/catalog.js",
-      "size": 8080,
-      "sha256": "16bfe5da58d20b83e0785f900fb7b16b27f85028a89df9bc0d95ccfc8a18b2e4"
+      "size": 5312,
+      "sha256": "8b5841c456badd5e263cf86b059d8762a3eccf1a313b750824bfbebf29da405e"
     },
     {
       "path": "src/channel.js",
@@ -71,8 +71,8 @@
     },
     {
       "path": "src/effort.js",
-      "size": 3364,
-      "sha256": "9cf246d5f252077b3c3c5d28be734006fdba4aca59a0e4412fe9b2bd8701dcb1"
+      "size": 7039,
+      "sha256": "997eec502b32a6f380aa389372a294f3491aa929dea45aa1d4dc6ebbe2aef0d0"
     },
     {
       "path": "src/feed.js",
@@ -81,13 +81,13 @@
     },
     {
       "path": "src/forward.js",
-      "size": 12583,
-      "sha256": "2cafa930972ff8a8c97915f81d5d2bf9a461a940c4f70475bacb7f4e028560f7"
+      "size": 11483,
+      "sha256": "b834d076846917f086b8508d30394012ef68a8d83ab2cc757c599c5cc0a4e89b"
     },
     {
       "path": "src/http.js",
-      "size": 8853,
-      "sha256": "434c05868ee8607421db6ce49676737bd39b698f81101d90e6c62778471084aa"
+      "size": 15224,
+      "sha256": "6a5ae22bd234ae114deab6cf878f850e4e4390d0090638467fab7d4a17681c48"
     },
     {
       "path": "src/messages.js",
@@ -96,8 +96,8 @@
     },
     {
       "path": "src/probe.js",
-      "size": 6230,
-      "sha256": "99ed3e576598eb19441af03dbf5ec51c621b80e36b29741471f6bda6f9c9ac32"
+      "size": 7268,
+      "sha256": "bb1ba68638e0c58ee091df0a7436065b799606f75fca5a5ea8923e38b7465347"
     },
     {
       "path": "src/push.js",
@@ -111,13 +111,13 @@
     },
     {
       "path": "src/store.js",
-      "size": 11471,
-      "sha256": "905b63f2af90ce8912887703b2fdaedb4eda50fd62823e82579915674eb8944e"
+      "size": 11399,
+      "sha256": "324f212544405db6ee409ae34e2e1276d209d3878e950c5bbdbd2dd069261011"
     },
     {
       "path": "src/stream.js",
-      "size": 14466,
-      "sha256": "f2d65cd619f67580afb052df572a61c0c97bbf1024a879214785bfa03b36065e"
+      "size": 14897,
+      "sha256": "64eb1e3b4aba13de32608842e769cd684c134cea63852935425d0d69b535aa98"
     },
     {
       "path": "src/trust.js",
@@ -126,13 +126,13 @@
     },
     {
       "path": "src/updater.js",
-      "size": 20445,
-      "sha256": "af1048ce6a1df936561238862d20940e76fc27424d2c1a2e775cb2bbdeec1aaa"
+      "size": 21180,
+      "sha256": "2c845c6cf1d121d7388426dd6c5a309b50a0aa448abb669dc5b3c8568a03e1d0"
     },
     {
       "path": "src/upstream.js",
-      "size": 8952,
-      "sha256": "4a57ae920f8f833dc1b55d87fabb388ee6effdbf4fd78f1cfa330bddf0aa9a81"
+      "size": 8920,
+      "sha256": "67ef62facc7c15248dd6b3d7e5523b8d1004ba792311d4568d92500a9c755bde"
     }
   ]
 }

@@ -26,10 +26,27 @@ function fakeContext() {
       log: m => logs.push(`log ${m}`),
     },
     fiber: { entry: { options: { id: 'our-free-model' } } },
-    get: () => undefined,
+    // `llm` is the only service the plugin declares; everything optional is
+    // reached through get(), so a fake that answers nothing would silently take
+    // the headless path and skip the settings-API and forward-port checks below.
+    get: name => (name === 'webServer' ? ctx.webServer : undefined),
     on: event => { captured.events.push(event); return () => {} },
     emit: event => { captured.events.push(`emit:${event}`) },
     effect: fn => { try { fn() } catch (e) { logs.push(`effect-error ${e.message}`) } return { [Symbol.dispose]: () => {} } },
+    /**
+     * cordis' nested fiber: run a callback once the named services exist, on a
+     * context that can read exactly them. This composition has all of them, and
+     * unlike the real loader this harness wants the routes registered before the
+     * first line of checks runs — so it is called inline. `scripts/tui-test.mjs`
+     * is where the service-arrives-late case is modelled, against the shared
+     * fake in `scripts/lib/fake-kernel.mjs`.
+     */
+    inject(deps, callback) {
+      const scoped = Object.create(ctx)
+      for (const name of deps) scoped[name] = ctx[name]
+      callback(scoped)
+      return { [Symbol.dispose]: () => {} }
+    },
     interval: () => () => {},
     timeout: () => () => {},
     llm: {

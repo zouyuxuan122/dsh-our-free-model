@@ -99,12 +99,21 @@ class BlockSink {
   }
 }
 
-/** Turn a provider `usage` object into the harness's disjoint TokenUsage. */
+/**
+ * Turn one provider `usage` object into the harness's disjoint TokenUsage.
+ *
+ * `prompt_tokens_details` is optional in the OpenAI schema, and the harness's
+ * durable session log rejects a non-finite number outright — so an absent cache
+ * count has to default to zero before the subtraction, not afterwards. Reading
+ * `undefined` off the optional field turned `inputTokens` into `NaN`, which any
+ * gateway that omits the details block would have handed the kernel on
+ * every single call.
+ */
 export function mapUsage(usage) {
   if (!usage || typeof usage !== 'object') return undefined
   const prompt = number(usage.prompt_tokens ?? usage.input_tokens)
   const completion = number(usage.completion_tokens ?? usage.output_tokens)
-  const cached = number(usage.prompt_tokens_details?.cached_tokens ?? usage.input_tokens_details?.cached_tokens)
+  const cached = number(usage.prompt_tokens_details?.cached_tokens ?? usage.input_tokens_details?.cached_tokens) ?? 0
   const cacheWrite = number(usage.prompt_tokens_details?.cache_write_tokens)
   const reasoning = number(usage.completion_tokens_details?.reasoning_tokens ?? usage.output_tokens_details?.reasoning_tokens)
   if (prompt === undefined && completion === undefined) return undefined

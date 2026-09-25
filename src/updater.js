@@ -232,12 +232,27 @@ export function verifyStaged(stageDir, manifest) {
   if (pkg.version !== manifest.version) throw new Error(`staged package.json says ${pkg.version}, manifest says ${manifest.version}`)
 }
 
-/** Walk a directory into relative file paths, skipping nothing but junk. */
+/**
+ * Top-level directories and files that belong to the repository rather than to a
+ * release. An installed copy never has them; a git-clone or linked development
+ * copy always does, and it is the same directory the upgrader operates on.
+ */
+const REPOSITORY_SCAFFOLDING = ['feed', 'scripts', 'docs', 'promo', 'node_modules']
+
+/**
+ * Walk a directory into relative file paths, skipping release scratch files and
+ * anything that belongs to the repository rather than to the package.
+ *
+ * The skip matters twice over: the backup must not copy a `.git` directory, and
+ * `installStaged` must not delete the development copy's test suite or feed
+ * directory as "a file the new release dropped".
+ */
 export function listPackageFiles(dir) {
   const out = []
   const visit = (current, rel) => {
     for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
       if (entry.name.endsWith('.ofm-new') || entry.name.endsWith('.ofm-old')) continue
+      if (rel === '' && (entry.name.startsWith('.') || REPOSITORY_SCAFFOLDING.includes(entry.name))) continue
       const child = path.join(current, entry.name)
       const childRel = rel === '' ? entry.name : `${rel}/${entry.name}`
       if (entry.isDirectory()) visit(child, childRel)

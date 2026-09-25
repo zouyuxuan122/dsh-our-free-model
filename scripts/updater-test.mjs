@@ -176,10 +176,24 @@ await checkAsync('apply() upgrades the package in place and records history', as
 await checkAsync('apply() drops files the new release removed', async () => {
   const pkg = makePackage(OLD)
   fs.writeFileSync(path.join(pkg, 'obsolete.js'), 'gone soon\n')
+  // A development install *is* the git working tree, so the repository's own
+  // scaffolding sits beside the shipped files: it is not part of any release,
+  // and the sweep that drops obsolete files must not eat the test suite or the
+  // history directory. The backup must not copy it either.
+  fs.mkdirSync(path.join(pkg, 'scripts'), { recursive: true })
+  fs.writeFileSync(path.join(pkg, 'scripts', 'picker-test.mjs'), 'kept\n')
+  fs.mkdirSync(path.join(pkg, 'feed'), { recursive: true })
+  fs.writeFileSync(path.join(pkg, 'feed', 'manifest.json'), '{}\n')
+  fs.mkdirSync(path.join(pkg, '.git'), { recursive: true })
+  fs.writeFileSync(path.join(pkg, '.git', 'HEAD'), 'ref: refs/heads/main\n')
   const data = makeDataDir()
   const updater = new PluginUpdater({ pkgDir: pkg, dataDir: data, settings: () => ({ feedUrl: `${base}/repo/feed/announcements.json` }), fetchImpl: fetch, defaultSources: CONTROLLED_DEFAULTS })
   await updater.apply({})
   assert.equal(fs.existsSync(path.join(pkg, 'obsolete.js')), false, 'a file absent from the manifest is removed')
+  assert.equal(fs.existsSync(path.join(pkg, 'scripts', 'picker-test.mjs')), true, 'the development scaffolding survives')
+  assert.equal(fs.existsSync(path.join(pkg, 'feed', 'manifest.json')), true, 'including the feed the manifest is published from')
+  assert.equal(fs.existsSync(path.join(pkg, '.git', 'HEAD')), true, 'and the git history')
+  assert.equal(fs.existsSync(path.join(updater.backupDir, '.git', 'HEAD')), false, 'the rollback copy holds the package, not the repository')
   fs.rmSync(pkg, { recursive: true, force: true })
   fs.rmSync(data, { recursive: true, force: true })
 })

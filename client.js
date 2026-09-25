@@ -51,9 +51,15 @@ window.__ModuleLoader__.load({
         'state.unknown': '未探测',
         'hint.region': '该模型按出口地区放行。开启网络代理后，插件会在下一次探测自动把它移入可用分组。',
         'hint.unknown': '尚未探测，默认保持可达。',
+        'hint.hidden': '探测显示网关点名了它却不路由它，因此已从模型选择器中移除；某一次探测重新通过，它会自己回来。',
+        'hint.sharedBudget': '该模型思考不可关闭：思考与可见回答共用同一份额度，档位越低留给正文的越少。',
+        'group.notAdvertised': '不在选择器中',
         'tag.vision': '视觉',
         'tag.text': '纯文本',
         'tag.thinking': '可调思考',
+        'tag.thinkingShared': '思考不可关',
+        'tag.rung': '默认档上限',
+        'tag.rungTitle': '各档位实际发出的输出上限：{ladder}。档位是思考与回答共用的额度，且不会超过上面的最长输出与设置里的单次上限。',
         'tag.context': '上下文',
         'tag.output': '最长输出',
         'tag.latency': '首字',
@@ -212,9 +218,15 @@ window.__ModuleLoader__.load({
         'state.unknown': 'Not probed',
         'hint.region': 'This model is gated by egress country. Once a proxy changes your egress, the next probe moves it into the available group by itself.',
         'hint.unknown': 'Not probed yet, so it stays reachable.',
+        'hint.hidden': 'The gateway names it but refuses to route it, so it is out of the model picker. It returns by itself as soon as a probe gets through.',
+        'hint.sharedBudget': 'Thinking cannot be switched off on this model, so thinking and the visible answer share one ceiling — a lower rung leaves the answer less room.',
+        'group.notAdvertised': 'Not in the picker',
         'tag.vision': 'Vision',
         'tag.text': 'Text only',
         'tag.thinking': 'Tunable thinking',
+        'tag.thinkingShared': 'Thinking always on',
+        'tag.rung': 'Default ceiling',
+        'tag.rungTitle': 'What each rung actually sends: {ladder}. A rung is one ceiling shared by thinking and the answer, and it never exceeds the max output above or the per-call ceiling in settings.',
         'tag.context': 'Context',
         'tag.output': 'Max output',
         'tag.latency': 'First token',
@@ -987,6 +999,7 @@ window.__ModuleLoader__.load({
       const { model: m, t, onBench, bench } = props
       const stateKey = `state.${m.availability}`
       const dim = m.availability !== 'available'
+      const rung = (m.budgets ?? []).find(row => row.isDefault === true)
       return h('article', { className: 'ofm_card' + (dim ? ' dim' : '') },
         h('div', { className: 'ofm_cardhead' },
           h('span', { className: 'ofm_cardname', title: m.name }, m.name),
@@ -994,14 +1007,18 @@ window.__ModuleLoader__.load({
         h('div', { className: 'ofm_id', title: m.id }, m.id),
         h('div', { className: 'ofm_tags' },
           h('span', { className: 'ofm_tag' }, m.vision ? t('tag.vision') : t('tag.text')),
-          m.reasoning ? h('span', { className: 'ofm_tag' }, t('tag.thinking')) : null,
+          m.reasoning ? h('span', { className: 'ofm_tag' }, m.canDisableThinking === false ? t('tag.thinkingShared') : t('tag.thinking')) : null,
           h('span', { className: 'ofm_tag' }, `${t('tag.context')} ${kilo(m.contextWindow)}`),
-          h('span', { className: 'ofm_tag' }, `${t('tag.output')} ${kilo(m.maxOutput)}`)),
+          h('span', { className: 'ofm_tag' }, `${t('tag.output')} ${kilo(m.maxOutput)}`),
+          rung === undefined ? null : h('span', { className: 'ofm_tag', title: t('tag.rungTitle').replace('{ladder}', m.budgets.map(row => `${row.name} ${kilo(row.tokens)}`).join(' · ')) },
+            `${t('tag.rung')} ${kilo(rung.tokens)}`)),
         m.availability === 'region-blocked' ? h('p', { className: 'ofm_note' }, t('hint.region'))
           : m.availability === 'unknown' ? h('p', { className: 'ofm_note' }, t('hint.unknown'))
-            : h('div', { className: 'ofm_metrics' },
-              m.ttftMs === undefined || m.ttftMs === 0 ? null : h('span', null, t('tag.latency'), ' ', h('b', null, Math.round(m.ttftMs)), ' ms'),
-              h('span', null, t('pref.probedAt'), ' ', h('b', null, ago(m.probedAt, t.locale)))),
+            : m.availability === 'unavailable' ? h('p', { className: 'ofm_note', title: m.detail ?? '' }, t('hint.hidden'))
+              : h('div', { className: 'ofm_metrics' },
+                m.ttftMs === undefined || m.ttftMs === 0 ? null : h('span', null, t('tag.latency'), ' ', h('b', null, Math.round(m.ttftMs)), ' ms'),
+                h('span', null, t('pref.probedAt'), ' ', h('b', null, ago(m.probedAt, t.locale)))),
+        m.canDisableThinking === false ? h('p', { className: 'ofm_note' }, t('hint.sharedBudget')) : null,
         onBench === undefined ? null : h('div', { className: 'ofm_row' },
           h(Button, { disabled: bench?.running === true, onClick: () => onBench(m) }, bench?.running === true ? t('bench.running') : t('bench.run')),
           bench?.result === undefined ? null : h('span', { className: 'ofm_note' }, bench.result)))
@@ -1022,7 +1039,7 @@ window.__ModuleLoader__.load({
       return h(Fragment, null,
         group(t('state.available'), available),
         group(t('state.region-blocked'), limited, t('hint.region')),
-        group(t('state.unknown'), other))
+        group(t('group.notAdvertised'), other, t('hint.hidden')))
     }
 
     // ── dashboard ─────────────────────────────────────────────────────────────
@@ -1388,6 +1405,7 @@ window.__ModuleLoader__.load({
               h(Pill, { strong: true, tone: data.settings.enabled !== false ? 'ok' : 'err' }, data.settings.enabled !== false ? t('pref.enabled') : 'off'),
               h(Pill, { tone: 'ok' }, `${counts.available ?? 0} ${t('state.available')}`),
               (counts['region-blocked'] ?? 0) > 0 ? h(Pill, { tone: 'warn' }, `${counts['region-blocked']} ${t('state.region-blocked')}`) : null,
+              (counts.unavailable ?? 0) > 0 ? h(Pill, { tone: 'err' }, `${counts.unavailable} ${t('state.unavailable')}`) : null,
               h(Pill, null, `${t('pref.egress')} ${data.egress?.country ?? data.egress?.ip ?? '—'}`),
               h(Pill, null, `${t('pref.probedAt')} ${ago(data.probedAt, t.locale)}`))),
           h('p', { className: 'ofm_tagline' }, t('subtitle'), ' · ', t('meta.description')),
@@ -1448,7 +1466,10 @@ window.__ModuleLoader__.load({
         h('p', null, t('ann.pitch')),
         h('ul', null, list(t, ['ann.p1', 'ann.p2', 'ann.p3'])))
       if (page === 1) {
-        const rows = summary?.catalog ?? []
+        // Advertised models first: this page is the tour a new user reads before
+        // they pick anything, and a refused id at the top of it is a bad first
+        // impression of a lane that is actually working.
+        const rows = (summary?.catalog ?? []).slice().sort((a, b) => (a.route === null ? 1 : 0) - (b.route === null ? 1 : 0))
         if (rows.length === 0) return h('p', null, t('loading'))
         return h(Fragment, null,
           h('h3', null, t('ann.models')),

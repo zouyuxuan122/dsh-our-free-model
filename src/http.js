@@ -14,6 +14,11 @@
  * - `ModelError` / "Model is unavailable" — the pooled account no longer routes
  *   that id at all.
  *
+ * How a 2xx body is read is decided by the body, not by `Content-Type`: this
+ * gateway is observed answering 200 with a JSON content type over an SSE frame
+ * stream, and believing the header cost the whole turn (issue #6). The head is
+ * sniffed and then replayed into the stream reader, so no token is buffered.
+ *
  * @module src/http.js
  */
 
@@ -66,6 +71,143 @@ function retryAfter(header) {
 }
 
 /**
+ * How many bytes to look at before deciding what the body is.
+ *
+ * The gateway is known to answer 200 with a `Content-Type` that is not
+ * `text/event-stream` while the body underneath is a perfectly normal SSE
+ * stream (issue #6, most visible on the chat wire under load). Trusting the
+ * header threw the whole turn away, so the body's own shape decides — and the
+ * bytes that were spent looking at it are replayed into the reader, never
+ * swallowed by a `response.text()`, which would buffer a live stream to the end
+ * before yielding a single token.
+ */
+const SNIFF_BYTES = 4096
+
+/**
+ * Classify the beginning of a response body by shape.
+ *
+ * @param {string} text - the decoded head, possibly a partial stream
+ * @returns {'sse'|'json'|'empty'|'unknown'}
+ */
+export function sniffBody(text) {
+  const head = String(text ?? '').replace(/^﻿/, '').trimStart()
+  if (head === '') return 'empty'
+  if (head.startsWith(':') || /^(?:data|event|id|retry)[ \t]*:/m.test(head.slice(0, 64))) return 'sse'
+  if (head.startsWith('{') || head.startsWith('[')) return 'json'
+  return 'unknown'
+}
+
+/**
+ * Take the first `limit` bytes of a body without losing the rest of it.
+ *
+ * @param {ReadableStream} stream
+ * @param {number} limit
+ * @param {object} options
+ * @param {AbortSignal} [options.signal]
+ * @param {number} options.timeoutMs - how long to wait for anything at all
+ * @returns {Promise<{reader:object, chunks:Uint8Array[], done:boolean, text:string, decoder:TextDecoder}>}
+ */
+async function readHead(stream, limit, { signal, timeoutMs }) {
+  const reader = stream.getReader()
+  const chunks = []
+  // One decoder for the whole body: flushing here would corrupt a multi-byte
+  // character whose tail arrives in the next chunk.
+  const decoder = new TextDecoder()
+  let size = 0
+  let text = ''
+  let done = false
+  try {
+    while (size < limit) {
+      const row = await headRead(reader, signal, deadlineFor(timeoutMs))
+      if (row.done) { done = true; break }
+      if (row.value === undefined) continue
+      chunks.push(row.value)
+      size += row.value.byteLength ?? 0
+      text += decoder.decode(row.value, { stream: true })
+    }
+  } catch (error) {
+    void reader.cancel().catch(() => {})
+    reader.releaseLock?.()
+    throw error
+  }
+  return { reader, chunks, done, text, decoder }
+}
+
+/** The head is the one read with no line-level deadline behind it, so it needs its own. */
+function deadlineFor(timeoutMs) {
+  return Date.now() + timeoutMs
+}
+
+/**
+ * One read off the body while deciding what it is, bounded by the same deadline
+ * and abort signal `readSse` would have honoured. Without this a connection that
+ * accepts the request and then never sends a byte would hang the turn here, in
+ * the few lines of code that run before any watchdog exists.
+ */
+async function headRead(reader, signal, deadline) {
+  if (signal?.aborted) throw new UpstreamError('request aborted', CODE.aborted)
+  let timer
+  let onAbort
+  const pending = reader.read()
+  const halted = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new UpstreamError('our-free-model: upstream sent no bytes before its deadline', CODE.timeout)),
+      Math.max(0, deadline - Date.now()))
+    timer.unref?.()
+    onAbort = () => {
+      void reader.cancel().catch(() => {})
+      reject(new UpstreamError('request aborted', CODE.aborted))
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+  try {
+    return await Promise.race([pending, halted])
+  } finally {
+    clearTimeout(timer)
+    signal?.removeEventListener('abort', onAbort)
+    // The losing read settles on its own once the reader is cancelled or closed;
+    // nothing is waiting on it, so its outcome must not surface as a rejection.
+    pending.catch(() => {})
+  }
+}
+
+/**
+ * Turn a head that was already read, plus the reader that follows it, back into
+ * one byte stream.
+ */
+async function* replayStream(head) {
+  try {
+    for (const chunk of head.chunks) yield chunk
+    if (head.done) return
+    while (true) {
+      const row = await head.reader.read()
+      if (row.done) return
+      if (row.value !== undefined) yield row.value
+    }
+  } finally {
+    if (!head.done) await head.reader.cancel().catch(() => {})
+    head.reader.releaseLock?.()
+  }
+}
+
+/**
+ * Read the rest of a body that is not a stream, as text.
+ *
+ * Continues on the decoder the head used, so a character split across the sniff
+ * boundary still decodes.
+ */
+async function readRemainder(head) {
+  let text = head.text
+  if (!head.done) {
+    while (true) {
+      const row = await head.reader.read()
+      if (row.done) break
+      if (row.value !== undefined) text += head.decoder.decode(row.value, { stream: true })
+    }
+  }
+  return text + head.decoder.decode()
+}
+
+/**
  * POST one request and stream back decoded SSE `data:` payloads.
  *
  * @param {object} options
@@ -104,7 +246,6 @@ export async function postStreamed({ path, body, session, requestId, attribution
   }
 
   const setRetry = retryAfter(response.headers.get('retry-after'))
-  const contentType = String(response.headers.get('content-type') ?? '')
   if (!response.ok) {
     const text = await response.text().catch(() => '')
     let payload
@@ -112,30 +253,51 @@ export async function postStreamed({ path, body, session, requestId, attribution
     throw classifyFailure(response.status, payload, setRetry)
   }
   if (response.body === null) throw new UpstreamError('our-free-model: upstream returned no body', CODE.empty)
-  if (!contentType.includes('event-stream')) {
-    const text = await response.text()
-    let payload
-    try { payload = JSON.parse(text) } catch { throw new UpstreamError(`our-free-model: unexpected non-SSE response: ${text.slice(0, 200)}`, CODE.server) }
-    if (payload.error) throw classifyFailure(response.status, payload, setRetry)
-    onData(JSON.stringify(payload))
+
+  // `Content-Type` is a hint, not a verdict: take the first bytes and let the body
+  // say what it is. Whatever was spent reading them is replayed in front of the
+  // stream, so nothing is buffered away and no frame is dropped.
+  const head = await readHead(response.body, SNIFF_BYTES, { signal, timeoutMs })
+  const shape = sniffBody(head.text)
+  if (shape === 'empty') throw new UpstreamError('our-free-model: upstream returned no body', CODE.empty)
+  if (shape === 'sse') {
+    await readSse(replayStream(head), onData, signal, timeoutMs)
     return { status: response.status, headers: response.headers }
   }
 
-  await readSse(response.body, onData, signal, timeoutMs)
+  const text = head.done ? head.text : await readRemainder(head)
+  if (shape !== 'json') throw new UpstreamError(`our-free-model: unexpected non-SSE response: ${text.slice(0, 200)}`, CODE.server, { status: response.status })
+  let payload
+  try { payload = JSON.parse(text) } catch {
+    throw new UpstreamError(`our-free-model: unexpected non-SSE response: ${text.slice(0, 200)}`, CODE.server, { status: response.status })
+  }
+  if (payload.error) throw classifyFailure(response.status, payload, setRetry)
+  onData(JSON.stringify(payload))
   return { status: response.status, headers: response.headers }
 }
 
-/** Split an SSE byte stream into `data:` payload strings; comment lines ignored. */
-export async function readSse(stream, onData, signal, timeoutMs = 300000) {
-  const reader = stream.getReader()
+/**
+ * Split an SSE byte stream into `data:` payload strings; comment lines ignored.
+ *
+ * The source is anything that yields byte chunks: a `ReadableStream` (Node's own
+ * response body) or an async iterable, which is what lets a head that was already
+ * sniffed be replayed in front of the live reader.
+ */
+export async function readSse(source, onData, signal, timeoutMs = 300000) {
+  const reader = typeof source?.getReader === 'function' ? source.getReader() : null
+  const iterator = reader ?? (typeof source?.[Symbol.asyncIterator] === 'function' ? source[Symbol.asyncIterator]() : source)
   const decoder = new TextDecoder()
   let buffer = ''
   let deadline = Date.now() + timeoutMs
-  const onAbort = () => { void reader.cancel().catch(() => {}) }
+  const stop = () => {
+    if (reader !== null) void reader.cancel().catch(() => {})
+    else void iterator?.return?.()
+  }
+  const onAbort = () => { stop() }
   signal?.addEventListener('abort', onAbort, { once: true })
   try {
     while (true) {
-      const { value, done } = await reader.read()
+      const { value, done } = await iterator.next()
       if (done) break
       if (Date.now() > deadline) throw new UpstreamError('our-free-model: upstream stream idle past its deadline', CODE.timeout)
       if (value !== undefined) buffer += decoder.decode(value, { stream: true })
@@ -148,6 +310,9 @@ export async function readSse(stream, onData, signal, timeoutMs = 300000) {
       }
       deadline = Date.now() + timeoutMs
     }
+    // Flush the decoder so a multi-byte character split over the last two chunks
+    // is not silently dropped from the final payload.
+    buffer += decoder.decode()
     emit(buffer, onData)
   } catch (error) {
     if (error instanceof UpstreamError) throw error
@@ -155,7 +320,8 @@ export async function readSse(stream, onData, signal, timeoutMs = 300000) {
     throw new UpstreamError(`our-free-model: stream read failed: ${error?.message ?? error}`, CODE.transport)
   } finally {
     signal?.removeEventListener('abort', onAbort)
-    reader.releaseLock?.()
+    if (reader !== null) reader.releaseLock?.()
+    else void iterator?.return?.()
   }
 }
 

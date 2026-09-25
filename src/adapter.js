@@ -21,7 +21,7 @@ import { applyFingerprint, baseModelId, endpointFor, mintRequestId, sessionForCo
 import { toChatMessages, toClaudeMessages, toResponseInput, toToolDefs, repairToolPairing } from './messages.js'
 import { CODE, UpstreamError, postStreamed } from './http.js'
 import { finishReason, readStream, windowTokens } from './stream.js'
-import { DEFAULT_LEVEL, LEVELS, budgetFor } from './effort.js'
+import { DEFAULT_LEVEL, budgetFor, effortsFor, resolveLevel } from './effort.js'
 import { createChannel } from './channel.js'
 
 export const ROUTE_MAIN = 'our-free-model'
@@ -83,7 +83,7 @@ export class FreeModelAdapter {
         provider,
         id: entry.id,
         name: entry.name,
-        description: describe(entry),
+        description: describe(entry, state.settings),
         inputModalities: entry.vision ? ['text', 'image'] : ['text'],
       }))
   }
@@ -100,17 +100,16 @@ export class FreeModelAdapter {
         defaultMaxTokens: 8192,
       }
     }
-    const reasoning = entry.reasoning === true
-      ? { efforts: LEVELS.map(level => ({ id: level.id, name: level.name })), defaultEffort: DEFAULT_LEVEL }
-      : undefined
+    const ceiling = Math.min(entry.maxOutput, state.settings.defaultMaxTokens ?? 32768)
+    const efforts = effortsFor(entry, undefined, state.settings.defaultMaxTokens)
     return {
       provider,
       id: entry.id,
       name: entry.name,
       inputModalities: entry.vision ? ['text', 'image'] : ['text'],
       context: { contextWindow: entry.contextWindow },
-      defaultMaxTokens: Math.min(entry.maxOutput, state.settings.defaultMaxTokens ?? 32768),
-      ...reasoning === undefined ? {} : { reasoning },
+      defaultMaxTokens: ceiling,
+      ...efforts === undefined ? {} : { reasoning: { efforts, defaultEffort: DEFAULT_LEVEL } },
     }
   }
 
@@ -183,7 +182,7 @@ export class FreeModelAdapter {
       this.deps.recordUsage({
         at: started,
         model: entry.id,
-        effort: options.reasoningEffort ?? DEFAULT_LEVEL,
+        effort: resolveLevel(options.reasoningEffort, entry)?.id ?? '',
         ok,
         input: usage?.inputTokens ?? 0,
         output: usage?.outputTokens ?? 0,
@@ -300,9 +299,19 @@ function toFailure(error) {
  * The `/model` popup's detail line. The composer renders only the model name, so
  * the capacities that matter for choosing a model — modality, window, whether an
  * effort menu exists — have to fit here.
+ *
+ * A model that cannot switch its thinking off names the shared ceiling outright:
+ * on that lane the rung is not only the answer's budget, and a picker that
+ * implied otherwise is how "why is it cut off at 8K when my ceiling is 32K" gets
+ * asked.
  */
-function describe(entry) {
+function describe(entry, settings) {
   const parts = [entry.vision ? 'vision + text input' : 'text input', `${Math.round(entry.contextWindow / 1024)}K context`]
-  if (entry.reasoning === true) parts.push('tunable thinking budget')
+  if (entry.reasoning === true) {
+    const rung = Math.round(budgetFor(DEFAULT_LEVEL, entry, undefined, settings?.defaultMaxTokens) / 1024)
+    parts.push(entry.canDisableThinking === false
+      ? `thinking always on · ${rung}K default ceiling, shared with the answer`
+      : 'tunable thinking budget')
+  }
   return parts.join(' · ')
 }

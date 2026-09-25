@@ -10,6 +10,18 @@
  * so the file URLs resolve beside the manifest — i.e. the repository root the
  * manifest lives in. Pushing the result to GitHub is the whole release.
  *
+ * `--check` writes nothing and exits non-zero when the committed manifest no
+ * longer matches the files it describes:
+ *
+ *     node scripts/build-manifest.mjs --check
+ *
+ * That mismatch is not cosmetic. The upgrader compares the downloaded bytes
+ * against this document before installing anything, so a stale entry fails the
+ * whole upgrade for every user — and the URLs are resolved from the repository,
+ * so they download the *new* file while checking it against the *old* hash.
+ * Editing any shipped file without re-running this script reproduces exactly
+ * that, which is why `--check` belongs in the test run and in front of a commit.
+ *
  * A manifest for a version already lower than or equal to the last published
  * one is rejected; pass --force to rebuild anyway.
  */
@@ -71,6 +83,40 @@ const manifest = {
   notes: typeof previous?.notes === 'string' && previous.version === pkg.version ? previous.notes : '',
   files,
 }
+
+if (process.argv.includes('--check')) {
+  const problems = describeDrift(previous, manifest)
+  if (problems.length === 0) {
+    console.log(`feed/manifest.json matches the ${files.length} files it describes (${files.reduce((sum, file) => sum + file.size, 0)} bytes)`)
+    process.exit(0)
+  }
+  console.error('feed/manifest.json does not describe the files on disk:')
+  for (const problem of problems) console.error(`  ${problem}`)
+  console.error('every user who upgrades now fails verification — run: node scripts/build-manifest.mjs')
+  process.exit(1)
+}
+
 fs.mkdirSync(path.dirname(manifestPath), { recursive: true })
 fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, undefined, 2)}\n`)
 console.log(`feed/manifest.json: ${pkg.version}, ${files.length} files, ${files.reduce((sum, file) => sum + file.size, 0)} bytes`)
+
+/**
+ * Every way the committed manifest can disagree with the tree, in the terms the
+ * upgrader itself checks: the version it will install, then each file's size and
+ * hash, in that order — a size mismatch already aborts the download.
+ */
+function describeDrift(committed, built) {
+  if (committed === undefined) return ['feed/manifest.json does not exist']
+  const problems = []
+  if (committed.version !== built.version) problems.push(`version ${committed.version} on disk, ${built.version} in the manifest`)
+  const byPath = new Map((Array.isArray(committed.files) ? committed.files : []).map(row => [row?.path, row]))
+  for (const file of built.files) {
+    const row = byPath.get(file.path)
+    byPath.delete(file.path)
+    if (row === undefined) { problems.push(`${file.path}: not in the manifest`); continue }
+    if (row.size !== file.size) problems.push(`${file.path}: size ${row.size} in the manifest, ${file.size} on disk`)
+    else if (row.sha256 !== file.sha256) problems.push(`${file.path}: sha256 ${String(row.sha256).slice(0, 12)}… in the manifest, ${file.sha256.slice(0, 12)}… on disk`)
+  }
+  for (const [leftover] of byPath) problems.push(`${leftover}: in the manifest but no longer shipped`)
+  return problems
+}

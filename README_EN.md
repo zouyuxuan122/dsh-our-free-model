@@ -36,12 +36,14 @@
 
 - **Nothing to configure** — install, restart, pick a model. No account, no key, no quota dashboard to register on.
 - **A roster that tracks upstream** — model set, context length and capabilities are re-fetched on every refresh rather than frozen into the plugin.
-- **Every model stays reachable** — models a probe could not reach no longer vanish from the picker; only region-gated ones move to their own `region-limited` group.
+- **The picker offers only what actually answers** — a model the upstream listing names but the gateway refuses to route outright (`Model is unavailable`, a 404 for that id) leaves the dropdown and stays visible in the settings page with its refusal recorded. Everything that is *not* a statement about the model keeps its model reachable: a 5xx from the gateway, a 429 quota window, a timeout or a dropped connection. Region-gated ones move to their own `region-limited` group. If a whole round refuses everything, nothing is hidden: the picker never goes empty.
 - **Announcement center with live push** — the repository owner edits one JSON file and pushes; every installation receives it within one poll cycle. Bodies are HTML rendered through a strict allowlist; `urgent` items open a full-screen modal; optional OS-level notifications.
 - **In-app upgrades** — one click in the settings page: download → SHA-256 verification → backup → atomic replace → read-back verification → hot reload, with automatic rollback if any step fails.
 - **Hot reload** — upgrades and code changes take effect immediately, no app restart; also available as a manual button and an optional file watcher.
 - **Region-aware, per egress** — models gated by geography are separated into their own `region-limited` group instead of failing mid-turn. Switch your network exit and the next probe reclassifies them automatically.
-- **Thinking effort that actually binds** — `Light / Balanced / Deep` map to output-token budgets of 2 048 / 8 192 / the model's full capacity, and are recorded per call. This is not a `reasoning_effort` string thrown at an endpoint that ignores it (see [Why a budget](#why-a-budget-and-not-reasoning_effort)).
+- **The body decides what it is, not the header** — under load this gateway answers 200 with a JSON `Content-Type` over a perfectly ordinary SSE frame stream. The plugin sniffs the first bytes and replays them into the stream, so the turn keeps streaming instead of being thrown away — and a working model is never demoted to `unavailable` because one header lied.
+- **Thinking effort that actually binds** — `Light / Balanced / Deep` map to output-token budgets of 2 048 / 8 192 / the model's full capacity, and are recorded per call. A model that cannot switch thinking off (MiMo V2.6 among them) gets the whole ladder doubled to 4 096 / 16 384 / capacity, because there thinking and the visible answer compete for the one ceiling; every model card in the settings page prints the number it will actually send. This is not a `reasoning_effort` string thrown at an endpoint that ignores it (see [Why a budget](#why-a-budget-and-not-reasoning_effort)).
+- **Works without a browser UI** — only `llm` is a hard dependency, so the plugin activates on a headless composition such as dsh-tui and still serves its models. The dashboard half lives on its own fiber and mounts itself when `webServer` appears, so a composition that loads plugins before its HTTP server exists still gets its settings page. Availability probing and the background loops run on plain timers.
 - **Usage dashboard, local only** — token heatmap, cumulative curve by total or per model, output speed and time-to-first-token sampled per call. Nothing is uploaded.
 - **OpenAI-compatible forward port** — expose these models to any other local tool through a base URL plus a generated API key.
 - **Clean names in the UI** — no mojibake, no upstream vendor strings leaking into your model picker.
@@ -55,9 +57,13 @@
 | `Our Free Model` | Models usable from your current network exit |
 | `Our Free Model · region-limited` | Models the upstream refuses for this region, kept visible but separated |
 
+A model the gateway names but refuses to route appears in neither group. It stays listed under
+**Not in the picker** in the settings page, with the refusal and the probe time, and returns to
+the picker by itself as soon as a probe gets through.
+
 **Settings page — `Settings → Our Free Model`**, six sections:
 
-1. **Model roster** — per-model availability, vision vs text-only, context window, max output, measured time-to-first-token, and an on-demand single-call benchmark.
+1. **Model roster** — per-model availability, vision vs text-only, context window, max output, the output ceiling each effort rung really sends, measured time-to-first-token, and an on-demand single-call benchmark.
 2. **Announcement center** — the owner-pushed feed: unread counter, urgency badges, mark-read (single/all), check-now button, OS-notification toggle. Bodies render HTML through the allowlist.
 3. **Usage board** — headline counters, a 17-week token heatmap, a cumulative curve switchable between tokens and request counts and between total and any single model, speed sparklines, and a per-model table.
 4. **Local forward** — enable/disable, bind host and port, copy base URL, show / copy / rotate the API key, and a ready-to-run `curl` example.
@@ -147,7 +153,11 @@ under `Our Free Model`. The selection is durable per session.
 **Change thinking depth.** The same menu exposes `Effort` with `Light`,
 `Balanced` and `Deep`. Higher levels spend more of the output budget on
 deliberation; the ceiling is enforced on the request, so the difference is
-measurable rather than cosmetic.
+measurable rather than cosmetic. It is **one** ceiling shared by deliberation and
+the visible answer, which is why a model that cannot switch thinking off gets
+the whole ladder doubled (the model cards in `Settings → Our Free Model` print the
+number each rung will really send). If answers keep getting cut off, move to
+`Deep`, or raise the per-call output ceiling in the settings.
 
 **Serve other local tools.** `Settings → Our Free Model → Local forward`, enable
 it, then copy the base URL and generate a key. Supported routes:
@@ -204,13 +214,22 @@ repository does not become code execution.
 # 1. bump `version` in package.json
 # 2. regenerate the manifest (size + SHA-256 of every published file)
 node scripts/build-manifest.mjs
-# 3. commit and push
+# 3. confirm the manifest matches the tree (non-zero exit otherwise; part of npm test)
+node scripts/build-manifest.mjs --check
+# 4. commit and push
 ```
+
+Step 2 is not optional. The manifest is the publisher's promise about every file's
+byte count and SHA-256: edit a published file and skip the rebuild, and a client
+downloads the *new* file while verifying it against the *old* hash — verification
+then correctly refuses to install, and the one-click upgrade is broken for every
+user on an older version. `--check` is what makes that fail before a commit
+instead of in the field.
 
 Installed plugins discover the new release automatically (every
 `updateCheckHours`, 6 by default) and notify the user; the upgrade itself runs
-in-app. The manifest re-verifies every file's SHA-256 and is re-fetched right
-before installing, so a stale manifest can never vouch for different bytes.
+in-app, and the manifest is re-fetched right before installing so a document
+fetched hours earlier cannot be used to vouch for bytes that changed since.
 
 ## How it works
 
@@ -254,7 +273,7 @@ nothing is worse than shipping no control, so effort is implemented as a hard
 output-token ceiling, which does bind — recorded reasoning tokens rise
 monotonically with the level.
 
-### Two kernel behaviours that cost real debugging time
+### Three kernel behaviours that cost real debugging time
 
 These are recorded here because they will bite any provider plugin:
 
@@ -267,6 +286,28 @@ These are recorded here because they will bite any provider plugin:
    matching result replays as `400 invalid_request_error`, after which *every*
    request in that session fails. The plugin repairs pairing before sending, on all
    three wires.
+3. **A service you did not name in `inject` throws when read as a property, and
+   `ctx.get()` answers `undefined` for one that is merely not provided yet.** Both
+   bit this round: after `inject` was reduced to `['llm']`, `typeof ctx.interval ===
+   'function'` threw `cannot get property "timer" without inject` (`ctx.interval` is
+   a mixin over the `timer` service) and the plugin stopped activating on *every*
+   composition. Switching that one to `ctx.get('webServer')` then answered
+   `undefined` — not because the composition had no web server, but because plugins
+   load before the browser half publishes it — so the settings routes were never
+   registered and the dashboard had no data source behind a server that was busy
+   serving the app. The shape that works is `ctx.inject(deps, callback)`: give the
+   services you need their own fiber and let *it* wait, instead of guessing once at
+   load time.
+
+### Why the response is read by body shape, not by `Content-Type`
+
+Under load this lane answers 200 with `application/json` over a normal SSE frame
+stream. Trusting the header meant `await response.text()` swallowed the live stream,
+`JSON.parse` failed, and the turn was lost — and because that error carried
+`status: 200`, the availability probe read the perfectly working model as
+unroutable and dropped it from the picker for a round. The first bytes (≤4 KB) are
+now sniffed and classified, then replayed into the stream, so nothing is buffered and
+no token arrives late; `sniffBody` in `src/http.js` is the only discriminator.
 
 ### Why the speed panel can say `—`
 
@@ -287,16 +328,43 @@ output speed, and says so.
 
 ## Verification
 
-Tested on both kernels, on Windows, against the live upstream. Every v1.1.2
-capability was **operated for real**, including click-through in a browser and
-inside the DSHEAC AIO desktop window:
+Tested on Windows against the live upstream. The table is kept per release round,
+and each row says which way it was checked — only the rows marked *live upstream*
+or *hands-on* are behaviour a user sees in the interface.
+
+### v1.2.2 (issues #1–#4, #6)
+
+Each row names how it was checked: *offline fake kernel* never leaves the machine,
+*live upstream* means the plugin really calls the gateway but runs on a
+hand-built cordis context, and *real kernel* means the plugin was installed and
+started inside dsh. The distinction cost this round a ship-blocker — see the last
+row.
+
+| Check | How | Result |
+| --- | --- | --- |
+| Manifest describes the shipped files | offline, `build-manifest.mjs --check` | All 26 published files match. Before the fix, `main`'s published 1.2.1 manifest had drifted on **6** files (`index.js`, both READMEs, `src/catalog.js`, `src/store.js`, `src/upstream.js`) — one more recurrence than the 2 issue #1 reported, after the issue was filed. Regenerated with the version, and `--check` now runs in `npm test` and in CI |
+| Offline suites | `npm test` (13 suites) | 13/13 pass; no network, no free-lane quota spent |
+| The new tests actually bite | old behaviour patched back in, suite re-run | Reverting the `computeMembership` guard → picker fails with `Cannot read properties of undefined (reading 'state')` (2 checks); reverting the response sniff → sniff fails 7 checks. Restoring each fix turns both green again |
+| Probe verdicts → what the picker advertises | live upstream, `host-selftest.mjs` | 10 listed models → 7 on the main route plus 2 under `region-limited`, and the forward port's `/v1/models` follows at 9; `deepseek-v4-flash-free` (`Model is unavailable`) left the dropdown with its refusal recorded in the settings page. 5xx / 429 / dropped connections all keep their model |
+| A model with no verdict is survivable | offline fake kernel, `picker-test.mjs` | With a newly listed model whose probe the test holds open, `listModels` and `/summary` both answer, the model is advertised and reads `availability=unknown` |
+| Rungs still enforced | live upstream, MiMo V2.6 Flash | `light` now sends 4096 and the same prompt finished `stop` at 2 980 tokens; before the change `light` (2048) ended that same prompt with `length` |
+| Long answers stop being cut | live upstream, `probes/long-answer.mjs` | `balanced` sent `max_tokens=16384`; the request produced **10 164** output tokens (19 914 characters, 194 s) and finished `stop`. The old 8192 ceiling cut the same turn with `length` — the symptom in issue #2. The model cards print each rung's real number (`默认档上限 16K`), read in the browser |
+| The body decides, not the header (issue #6) | offline fake gateway, `sniff-test.mjs` | A 200 with `application/json` over SSE frames streams normally with no error; a Chinese character split across chunks, a 400-frame stream past the 4 K sniff window, a single JSON body, an empty body and an HTML junk body all route by shape. On the old code that same response also made the probe report a working model as `unavailable` |
+| Composition with no web server | offline fake kernel, `scripts/tui-test.mjs` | With only `llm` mounted, `apply()` does not throw, both routes register, a full streamed turn completes, the forward port comes up and rejects keyless requests, and the background loops run on plain unref'd timers. The dashboard half waits, and mounts both routes the moment `webServer` appears. **Not yet verified on a real dsh-tui**: neither kernel on this machine (source build 0.1.7-rc.1, AIO 6.9.3) ships a tui profile |
+| The plugin really installs and runs | **real kernel**, dsh 0.1.7-rc.1 web on port 3099 | No `did not activate` in the startup log; `/api/our-free-model/summary` 200 (10 models: 6 available, 2 region-blocked, 1 unknown, 1 unavailable), `/events` streams its hello; in the browser `Settings → Our Free Model` renders the 10 cards, the *Not in the picker* group, the `思考不可关` and `默认档上限 16K` tags, with an empty console. The first cut of this round **failed here**: with `inject` reduced to `['llm']`, reading `ctx.interval` threw `cannot get property "timer" without inject` and the plugin stopped activating on every composition |
+| Usage accounting | offline, `retry-safety-test.mjs` | A `usage` object without `prompt_tokens_details` no longer computes `inputTokens: NaN`; the forward port answers in `prompt_tokens/completion_tokens` and reports a refused turn as an error instead of an empty 200 |
+
+### v1.1.2 (announcements, in-app upgrades, hot reload, trust fence)
+
+Every v1.1.2 capability was **operated for real**, including click-through in a
+browser and inside the DSHEAC AIO desktop window:
 
 | Check | Result |
 | --- | --- |
 | `dsh` 0.1.7-rc.1 (source build) | Boots clean; picker shows both groups; multi-round tool calling completes |
 | `dsh` 0.1.5-rc.2 (DSHEAC AIO 6.9.3 kernel) | Boots clean alongside the other installed third-party plugins |
 | EAC startup gate | Run at install time **and after the in-app upgrade**: `compatible` / `PASS` |
-| Model reachability | All 10 catalog models stay invocable (including probe-failed/unavailable ones); real chat, multi-round tools and vision input pass on both kernels |
+| Model reachability | All 10 catalog models stayed invocable (behaviour at that round: even probe-failed ones remained in the picker; since v1.2.2 a model judged unroutable is not advertised); real chat, multi-round tools and vision input pass on both kernels |
 | Real harness conversation | One real turn completed and answered in both dsh web and the AIO desktop window |
 | Announcement feed | New items pushed on a local "repository server" arrived within one poll cycle on both surfaces |
 | Announcement center UI | 4 items rendered (bold/code/links/lists), urgency badge, unread dots, mark-read single/all |
@@ -336,26 +404,33 @@ it never touches files.
 ## Development
 
 ```bash
+npm test                            # every offline suite below, plus the manifest check
 node scripts/client-lint.mjs        # browser half: copy/style key coverage, bundle executes
 node scripts/sanitize-test.mjs      # announcement HTML allowlist renderer vs an XSS corpus
 node scripts/trust-test.mjs         # request trust fence for the plugin's routes
 node scripts/feed-test.mjs          # announcement feed: parsing, failover, cache, arrivals
 node scripts/updater-test.mjs       # in-app upgrade: manifests, SHA-256, backup/rollback
 node scripts/build-manifest.mjs     # release: regenerate feed/manifest.json
-node scripts/retry-safety-test.mjs  # failures and retry policy are durable-log safe
+node scripts/retry-safety-test.mjs  # failures, retry policy and usage counts are durable-log safe
 node scripts/speed-stat-test.mjs    # no call can average its way into a fake tok/s
+node scripts/effort-test.mjs        # a rung is the max_tokens that goes out, and is recorded as itself
+node scripts/sniff-test.mjs         # a 2xx body is read by shape: SSE frames, single JSON, empty, split mid-codepoint
+node scripts/picker-test.mjs        # only usable models are advertised, and the picker never goes empty
+node scripts/tui-test.mjs           # the plugin activates and serves with no web server in the composition
 node scripts/host-selftest.mjs      # host half end to end against the live upstream
 ```
 
 `scripts/probes/` holds the one-off evidence scripts behind the findings report —
 capability matrix, region gate, the `reasoning_effort` no-op sampling, budget
 dialects, dangling tool calls, tool-name charset rules, raw read timestamps
-(`batch-delivery`), and per-frame arrival against final usage (`decode-window`).
-Five of them exercise this plugin's own code and run from the repo root
+(`batch-delivery`), per-frame arrival against final usage (`decode-window`),
+and whether a long answer survives its ceiling (`long-answer`). Six of them
+exercise this plugin's own code and run from the repo root
 (`node scripts/probes/pairing-repair.mjs`); the rest reach the upstream through a
 third-party SSE client and assume that checkout's module paths, so they are
 recorded as evidence rather than offered as a test suite. None of them is wired
-into `npm test`, because there is no install step to wire them into.
+into `npm test`, which runs the offline checks above — no network, no free-lane
+quota spent.
 
 Requires Node `^22.19.0 || >=24.0.0`. No install step, no dependencies.
 

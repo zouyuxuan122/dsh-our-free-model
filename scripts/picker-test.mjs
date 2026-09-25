@@ -166,6 +166,22 @@ check('a model that can think nothing at all keeps the published rungs',
   museMenu.map(row => row.description.match(/^(\d+) K/)?.[1]), ['2', '8', '32'])
 check('without the always-thinking clause', museMenu.every(row => !/cannot be switched off/.test(row.description)), true)
 
+// Hiding a model is about *selection*, not about breaking a session that already
+// picked it: the composer still resolves it, and a turn still reaches the gateway
+// and fails (or succeeds) on the upstream's own answer rather than on the plugin
+// pretending the id is unknown.
+const hidden = await adapter.resolveModel(ROUTE_MAIN, 'deepseek-v4-flash-free')
+check('a hidden model still resolves its real capacities for the session using it', [hidden?.id, hidden?.context?.contextWindow], ['deepseek-v4-flash-free', 128000])
+check('and its effort menu is intact', hidden?.reasoning?.efforts?.map(row => row.id), ['light', 'balanced', 'deep'])
+const hiddenTurn = []
+for await (const chunk of adapter.stream({
+  provider: ROUTE_MAIN, model: 'deepseek-v4-flash-free', sessionId: 'picker:hidden',
+  messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+})) hiddenTurn.push(chunk)
+const hiddenFinish = hiddenTurn.find(chunk => chunk.type === 'finish')?.reason
+check('a turn on it fails as an upstream error, not as an unresolvable model', hiddenFinish?.kind, 'error')
+check('with the gateway message attached', /unavailable/i.test(hiddenFinish?.failure?.message ?? ''), true)
+
 // Turning the region group off hides those models rather than listing them as broken.
 await callRoute(api(), 'POST', '/api/our-free-model/settings', { exposeRegionModels: false })
 check('withhold-region hides them from the region route', await advertised(ROUTE_REGION), [])

@@ -126,11 +126,30 @@ async function readHead(stream, limit, { signal, timeoutMs }) {
       text += decoder.decode(row.value, { stream: true })
     }
   } catch (error) {
-    void reader.cancel().catch(() => {})
-    reader.releaseLock?.()
-    throw error
+    // Abandoning the body: cancel it so the connection is not held, and do not
+    // let a lock-release complaint replace the failure the caller has to
+    // classify (a raw TypeError here would reach the harness unclassified).
+    await reader.cancel().catch(() => {})
+    try { reader.releaseLock?.() } catch { /* mid-teardown */ }
+    throw classifyStreamFailure(error, signal)
   }
   return { reader, chunks, done, text, decoder }
+}
+
+/**
+ * Normalize anything the body reads can throw into an `UpstreamError`.
+ *
+ * This matters beyond tidiness: aborting a request rejects the pending
+ * `reader.read()` with the signal's own `DOMException`, whose `code` is the
+ * *numeric* legacy `20`. The adapter's `toFailure` only carries a string code, so
+ * anything it does not recognize is reported as `TRANSPORT` — and `TRANSPORT` is
+ * in the retryable set, which would have the harness retry a turn the user
+ * deliberately cancelled.
+ */
+export function classifyStreamFailure(error, signal) {
+  if (error instanceof UpstreamError) return error
+  if (signal?.aborted === true || error?.name === 'AbortError') return new UpstreamError('request aborted', CODE.aborted)
+  return new UpstreamError(`our-free-model: upstream stream read failed: ${error?.message ?? error}`, CODE.transport)
 }
 
 /** The head is the one read with no line-level deadline behind it, so it needs its own. */
@@ -195,14 +214,19 @@ async function* replayStream(head) {
  * Continues on the decoder the head used, so a character split across the sniff
  * boundary still decodes.
  */
-async function readRemainder(head) {
+async function readRemainder(head, signal) {
   let text = head.text
-  if (!head.done) {
-    while (true) {
-      const row = await head.reader.read()
-      if (row.done) break
-      if (row.value !== undefined) text += head.decoder.decode(row.value, { stream: true })
+  try {
+    if (!head.done) {
+      while (true) {
+        const row = await head.reader.read()
+        if (row.done) break
+        if (row.value !== undefined) text += head.decoder.decode(row.value, { stream: true })
+      }
     }
+  } catch (error) {
+    await head.reader.cancel().catch(() => {})
+    throw classifyStreamFailure(error, signal)
   }
   return text + head.decoder.decode()
 }
@@ -265,7 +289,7 @@ export async function postStreamed({ path, body, session, requestId, attribution
     return { status: response.status, headers: response.headers }
   }
 
-  const text = head.done ? head.text : await readRemainder(head)
+  const text = head.done ? head.text : await readRemainder(head, signal)
   if (shape !== 'json') throw new UpstreamError(`our-free-model: unexpected non-SSE response: ${text.slice(0, 200)}`, CODE.server, { status: response.status })
   let payload
   try { payload = JSON.parse(text) } catch {
@@ -315,9 +339,7 @@ export async function readSse(source, onData, signal, timeoutMs = 300000) {
     buffer += decoder.decode()
     emit(buffer, onData)
   } catch (error) {
-    if (error instanceof UpstreamError) throw error
-    if (signal?.aborted) throw new UpstreamError('request aborted', CODE.aborted)
-    throw new UpstreamError(`our-free-model: stream read failed: ${error?.message ?? error}`, CODE.transport)
+    throw classifyStreamFailure(error, signal)
   } finally {
     signal?.removeEventListener('abort', onAbort)
     if (reader !== null) reader.releaseLock?.()

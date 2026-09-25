@@ -1,7 +1,7 @@
 {
   "version": "1.2.2",
   "base": "../",
-  "publishedAt": "2026-09-25T18:43:44.899Z",
+  "publishedAt": "2026-09-25T19:08:41.436Z",
   "notes": "修复：应用内升级（1.2.1 的清单与实际文件不一致，旧版本点一键升级必然在校验阶段失败）；思考关不掉的模型三档预算翻倍（4096/16384/上限），长回答不再频繁被截断；探测判定不可用的模型不再出现在模型选择器与模型探测结果里；只声明 llm 依赖，没有 web server 的 composition（dsh-tui）也能加载；转发端口按 OpenAI 字段回报 usage，被拒绝的回合不再返回空的 200。",
   "files": [
     {
@@ -46,13 +46,13 @@
     },
     {
       "path": "README_EN.md",
-      "size": 34295,
-      "sha256": "fd9f23c90ac01923e620b6473fdbc79f2a9ee5f65cce361bed65b4a6c0fc3769"
+      "size": 35208,
+      "sha256": "986032bdf8e14b29630f17787a3b7adbf65a78db3a66fdaf63d95c7c76fd2d73"
     },
     {
       "path": "README.md",
-      "size": 33774,
-      "sha256": "9c4ed71e4b249f65d7ec61338850efe38a44c28209f5bbee9d68ae82b1b6bae6"
+      "size": 34697,
+      "sha256": "72f9c4f5385fe47a1371bcac6930bb96e5ca0ec0a5ba40c622f0d556f3bf5f33"
     },
     {
       "path": "src/adapter.js",
@@ -86,8 +86,8 @@
     },
     {
       "path": "src/http.js",
-      "size": 15224,
-      "sha256": "6a5ae22bd234ae114deab6cf878f850e4e4390d0090638467fab7d4a17681c48"
+      "size": 16334,
+      "sha256": "32eaeef8908ce60178ca5270cf2f9a0704ef234999bcd265de2c3dc7185d96a1"
     },
     {
       "path": "src/messages.js",

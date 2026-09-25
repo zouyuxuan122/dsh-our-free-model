@@ -319,8 +319,8 @@ reasoning token 从分子里剔掉，`decodeWindow()` 拒掉短到没法计时�
 
 | 项目 | 方式 | 结果 |
 | --- | --- | --- |
-| 发布清单与实物一致 | 离线 `build-manifest.mjs --check` | 26 个发布文件全部一致。改动前线上 main 的 1.2.1 清单已漂移 **6 个文件**（`index.js`、`README.md`、`README_EN.md`、`src/catalog.js`、`src/store.js`、`src/upstream.js`），比 issue #1 报的 2 个更多——即提出 issue 之后又复发了一次。现已随版本重生成，并且 `--check` 进了 `npm test` 和 CI |
-| 离线套件 | `npm test`（13 个套件） | 13/13 通过；不出网、不花免费额度 |
+| 发布清单与实物一致 | 离线 `build-manifest.mjs --check` + `release-e2e.mjs` | 26 个发布文件全部一致。改动前线上 main 的 1.2.1 清单已漂移 **6 个文件**（`index.js`、`README.md`、`README_EN.md`、`src/catalog.js`、`src/store.js`、`src/upstream.js`），比 issue #1 报的 2 个更多——即提出 issue 之后又复发了一次。现已随版本重生成；`--check` 与新增的 `release-e2e.mjs`（拿真实清单+真实文件把升级完整跑一遍，含"清单谎报 1 个字节必须被拒绝"的反向对照）都进了 `npm test` 和 CI |
+| 离线套件 | `npm test`（14 个套件） | 14/14 通过；不出网、不花免费额度 |
 | 新测试真的能咬住回归 | 逐条把旧行为改回去再跑 | `computeMembership` 的未判定模型：改回旧写法 → picker 报 `Cannot read properties of undefined (reading 'state')`（2 条检查失败）；`postStreamed` 的 Content-Type 判定：改回旧写法 → sniff 7 条检查失败。恢复后各自全绿 |
 | 探测判定与选择器广播 | 真实上游 `host-selftest.mjs` | 清单 10 个模型 → 主分组 7 + `region-limited` 2，转发端口 `/v1/models` 同步 9 个；`deepseek-v4-flash-free`（`Model is unavailable`）移出下拉框并在设置页保留拒因；5xx/429/断网一律保持可达（issue #3 的判定不再误伤抖动） |
 | 未判定模型不再致命 | 离线假内核 `picker-test.mjs` | 清单新增一个模型、它的探测被测试按住时，`listModels` 与 `/summary` 都正常返回，该模型 `availability=unknown` 且照常广播 |
@@ -329,6 +329,7 @@ reasoning token 从分子里剔掉，`decodeWindow()` 拒掉短到没法计时�
 | SSE 帧不再被 header 出卖（issue #6） | 离线假网关 `sniff-test.mjs` | 200 + `application/json` + 体内是 SSE 帧：正常吐 token，不报错；跨 chunk 截断的中文字符、超过 4 K 嗅探窗口的 400 帧长流、单包 JSON、空 body、HTML 杂七杂八全部按形状分流。同一场景在旧代码上会让探测把可用模型判成 `unavailable` |
 | 无 web server 的 composition | 离线假内核 `scripts/tui-test.mjs` | 只挂 `llm` 时 `apply()` 不抛错、注册两条路由、跑完一轮流式对话、转发端口起来并拒掉无 Key 请求；后台循环走普通 unref 定时器。看板半身停在待命状态，`webServer` 一出现就自己挂上两条路由。**真实 dsh-tui 尚未实机验证**：本机两套内核（dsh 0.1.7 源码构建、AIO 6.9.3）都不含 tui profile |
 | 插件在真实内核里真的能装 | **真实内核** `dsh` 0.1.7-rc.1 web，端口 3099 | 启动无 `did not activate`；`/api/our-free-model/summary` 200（10 个模型：6 available、2 region-blocked、1 unknown、1 unavailable）、`/events` 起来推 hello；浏览器里进 `设置 → Our Free Model` 逐项读到 10 张模型卡、`不在选择器中` 分组、`思考不可关` 与 `默认档上限 16K` 标签，控制台零报错。本轮最初版本在这一步是**失败**的：`inject` 只留 `llm` 之后读 `ctx.interval` 抛 `cannot get property "timer" without inject`，插件在所有 composition 里都不再激活 |
+| 复审自己抓到的两个新问题 | 定向复现 + 常驻断言 | ① head 嗅探阶段被 abort 时抛的是原生 `AbortError`（`code` 是数字 20），`toFailure` 认不出来会降级成 `TRANSPORT`——而 `TRANSPORT` 在可重试名单里，用户主动取消的回合有被内核重试的口子；现在三条读取路径共用 `classifyStreamFailure`，sniff 里两条 abort 断言常驻。② 提交后我又改了 `src/http.js`，清单再次漂移，被 `--check` 与新加的 `release-e2e.mjs` 当场逮住——门禁按设计起作用，但也说明**任何一次改动后都得重跑** |
 | usage 计数干净 | 离线 `retry-safety-test.mjs` | 没有 `prompt_tokens_details` 的 usage 不再把 `inputTokens` 算成 `NaN`；转发端口按 `prompt_tokens/completion_tokens` 回报，被网关拒绝的转发请求返回错误而不是空的 200 |
 
 ### 上一轮：v1.1.2（公告、升级、热重载与信任围栏）
@@ -387,7 +388,8 @@ node scripts/trust-test.mjs         # 插件路由的请求信任围栏
 node scripts/feed-test.mjs          # 公告 feed：解析、故障转移、缓存、到达检测（本地 HTTP 服务器）
 node scripts/updater-test.mjs       # 应用内升级：清单校验、SHA-256、备份/回滚（本地 HTTP 服务器）
 node scripts/effort-test.mjs        # 思考档位 = 真正下发的 max_tokens，且与留痕的档位一致
-node scripts/sniff-test.mjs         # 200 响应按 body 形状分流：SSE 帧、单包 JSON、空 body、跨 chunk 多字节
+node scripts/sniff-test.mjs         # 200 响应按 body 形状分流：SSE 帧、单包 JSON、空 body、跨 chunk 多字节、中途 abort
+node scripts/release-e2e.mjs        # 用真实的 feed/manifest.json 装一遍升级，并验证谎报字节的清单会被拒绝
 node scripts/picker-test.mjs        # 选择器只广播真能用的模型，且永不广播空集合
 node scripts/tui-test.mjs           # 没有 web server 的 composition 里插件照样启动并出模型
 node scripts/host-selftest.mjs      # Host 半身端到端，会真实出网

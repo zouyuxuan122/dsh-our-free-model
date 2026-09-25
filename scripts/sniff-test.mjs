@@ -45,10 +45,12 @@ const server = http.createServer((req, res) => {
       return
     }
     if (script.holdMs !== undefined) {
-      // A status line and headers, then nothing: the gateway that accepts a
-      // request and stalls before the first frame.
+      // A status line and headers, then a stall: with no pieces that is the
+      // gateway that accepts a request and never starts the body; with pieces the
+      // body starts and then stops, which is what an abort has to interrupt.
       res.writeHead(script.status ?? 200, { 'content-type': script.contentType })
       res.flushHeaders?.()
+      for (const piece of script.pieces ?? []) res.write(Buffer.from(piece))
       setTimeout(() => res.end(), script.holdMs).unref?.()
       return
     }
@@ -156,8 +158,52 @@ const stalled = await ask('mimo-v2.6-flash-free', { timeoutMs: 250 })
 check('a body that never starts is a timeout, not a hang', stalled.error?.code, CODE.timeout)
 check('and it says so', /no bytes/.test(stalled.error?.message ?? ''), true)
 
+// ── aborting a stream that was already sniffed ───────────────────────────────
+// The replayed head means the reader is owned by a generator rather than by the
+// response directly, so cancellation has to reach through both layers.
+scripts.set('jev-1.13-free', {
+  contentType: 'application/json',
+  holdMs: 4000,
+  // `chatFrames` already spells the frame separators, so the fixture borrows it.
+  pieces: [chatFrames('first').split('data: [DONE]')[0]],
+})
+const controller = new AbortController()
+let seenBeforeAbort = 0
+const abortedEarly = await new Promise(resolve => {
+  setTimeout(() => controller.abort(), 150).unref?.()
+  postStreamed({
+    path: '/zen/v1/chat/completions',
+    body: { model: 'jev-1.13-free', messages: [], stream: true },
+    session: 's', requestId: 'r', signal: controller.signal,
+    onData: () => { seenBeforeAbort++ },
+  }).then(() => resolve('resolved')).catch(error => resolve(error?.code ?? 'uncoded'))
+})
+check('a stream aborted during the sniff reads as aborted, not as transport', abortedEarly, CODE.aborted)
+check('and nothing was handed over while the head was still being sniffed', seenBeforeAbort, 0)
+
+// The same cancellation one moment later, once the head is past the sniff window
+// and `readSse` owns the reader instead of `readHead`: two different layers, and
+// both have to report the user's stop as ABORTED rather than as a retryable
+// transport failure.
+const manyFrames = Array.from({ length: 120 }, (_, index) => `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: `t${index}` } }] })}
+
+`).join('')
+scripts.set('union-alpha', { contentType: 'text/event-stream', holdMs: 4000, pieces: [manyFrames] })
+const controller2 = new AbortController()
+let delivered = 0
+const abortedMid = await new Promise(resolve => {
+  setTimeout(() => controller2.abort(), 120).unref?.()
+  postStreamed({
+    path: '/zen/v1/chat/completions',
+    body: { model: 'union-alpha', messages: [], stream: true },
+    session: 's', requestId: 'r', signal: controller2.signal,
+    onData: () => { delivered++ },
+  }).then(() => resolve('resolved')).catch(error => resolve(error?.code ?? 'uncoded'))
+})
+check('a stream aborted after the head reads as aborted too', abortedMid, CODE.aborted)
+check('with the tokens it had already streamed', delivered > 0, true)
+
 // ── the classifier on its own ────────────────────────────────────────────────
-check('the shape of a stream', sniffBody('data: {"a":1}\n\n'), 'sse')
 check('leading blank lines do not hide it', sniffBody('\n\n  data: {"a":1}'), 'sse')
 check('a byte-order mark does not hide it', sniffBody('﻿data: {"a":1}'), 'sse')
 check('an `event:` line is a stream too', sniffBody('event: response.created\ndata: {}'), 'sse')

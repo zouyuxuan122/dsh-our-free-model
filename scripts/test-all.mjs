@@ -21,6 +21,7 @@ const only = process.argv.indexOf('--only') === -1 ? null : process.argv[process
 
 const suites = [
   ['manifest', 'build-manifest.mjs', ['--check']],
+  ['release', 'release-e2e.mjs', []],
   ['client-lint', 'client-lint.mjs', []],
   ['trust', 'trust-test.mjs', []],
   ['sanitize', 'sanitize-test.mjs', []],

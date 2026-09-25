@@ -120,6 +120,19 @@ DSH_HOME=<DSH_HOME> dsh --profile <profile> --dump-config | grep our-free-model
 
 应当只出现**一个** `id: our-free-model`。
 
+### 安装失败：`ERR_PNPM_VIRTUAL_STORE_DIR_MAX_LENGTH_DIFF`
+
+这是**目标 profile 的 pnpm 状态问题，与插件仓库无关**（报错发生在下载插件之前）：profile 里已有的
+`node_modules` 是旧版 pnpm 生成的，dsh 更新后自带的 pnpm 版本变了，pnpm 拒绝在旧参数上继续安装。
+关掉 dsh，删掉 profile 的 `node_modules` 和 `pnpm-lock.yaml` 让它重建，然后重新安装：
+
+```bash
+rd /s /q "%DSH_HOME%\profiles\web\node_modules"
+del "%DSH_HOME%\profiles\web\pnpm-lock.yaml"
+```
+
+同时出现的 `Ignoring broken lockfile` 警告会随重建一起消失。
+
 ## 使用说明
 
 **选模型**：打开输入框的模型选择器，选 `Our Free Model` 分组下的任意模型。选择按会话持久。

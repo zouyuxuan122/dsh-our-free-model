@@ -124,6 +124,21 @@ DSH_HOME=<DSH_HOME> dsh --profile <profile> --dump-config | grep our-free-model
 
 You should see exactly **one** `id: our-free-model` entry.
 
+### Install failure: `ERR_PNPM_VIRTUAL_STORE_DIR_MAX_LENGTH_DIFF`
+
+This is a **pnpm state problem in the target profile, not the plugin repo** (it fires
+before the plugin is even downloaded): the profile's existing `node_modules` was
+created by an older pnpm, and after a dsh update the bundled pnpm refuses to keep
+using it. Close dsh, delete the profile's `node_modules` and `pnpm-lock.yaml` to
+let pnpm rebuild them, then install again:
+
+```bash
+rd /s /q "%DSH_HOME%\profiles\web\node_modules"
+del "%DSH_HOME%\profiles\web\pnpm-lock.yaml"
+```
+
+The accompanying `Ignoring broken lockfile` warnings disappear with the rebuild.
+
 ## Usage
 
 **Pick a model.** Open the model selector in the composer and choose anything

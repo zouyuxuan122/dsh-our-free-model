@@ -41,6 +41,9 @@ node scripts/build-manifest.mjs --check
 # 4. 提交并推送，再打 tag 并创建 Release
 git tag -a v1.2.3 -m "…" && git push origin v1.2.3
 gh release create v1.2.3 --title "…" --notes-file …
+# 5. purge CDN 缓存（不做的话 jsDelivr 上的 @main 会继续发上一版，见下一节）
+curl "https://purge.jsdelivr.net/gh/zouyuxuan122/dsh-our-free-model@main/feed/manifest.json"
+curl "https://purge.jsdelivr.net/gh/zouyuxuan122/dsh-our-free-model@main/feed/announcements.json"
 ```
 
 第 2 步不是可选项：清单是发布者对每个文件的**字节数与 SHA-256 的承诺**，改了发布文
@@ -58,20 +61,35 @@ SHA-256，并在安装前重新拉取一次，避免用陈旧清单校验新文�
 
 ## 关于源顺序与网络现实
 
-插件按 `jsDelivr → raw.githubusercontent(main) → (master)` 的顺序拉取，全部失败时降级
-到上一次的缓存并如实标注错误。jsDelivr 优先是因为 raw.githubusercontent 在部分网络
-（实测本机 CN 出口 + Watt Toolkit 类加速工具）会被本地反代劫持——git push 正常但 raw
-对新文件返回假 404；jsDelivr 的边缘节点直连可达，请求自动附带分钟级 cache-buster，
-不会被 CDN 长缓存拖住新鲜度。
+真正的顺序是 `raw.githubusercontent(main) → jsDelivr(@main) → raw(master)`，全部失败时
+降级到上一次的缓存并如实标注错误。以代码为准：`src/feed.js` 与 `src/updater.js` 里
+`DEFAULT_*_SOURCES` 的**数组顺序**就是它（这两个文件的注释写着"jsDelivr 优先"，是旧版本
+留下的说法，与数组不符）。
 
-两个发布者须知：
+raw 排在前面是因为它**权威、不缓存**：推上去立刻能读到。但它在部分网络（实测本机 CN
+出口 + Watt Toolkit 类加速工具）根本走不通——`git push` 正常，而 raw 对新文件返回假
+404，或干脆 TLS 失败（`UNABLE_TO_VERIFY_LEAF_SIGNATURE`）。这些网络上 jsDelivr 是唯一
+的源，所以下一条很要紧。
 
-1. **jsDelivr 对新仓库的首次收录有延迟**（几分钟到数小时不等，创建 Release 会触发
-   收录）；收录完成前，新推送的公告/更新会暂时拉取不到（客户端显示缓存并标注
-   源不可达）。收录只发生一次，之后 `@main` 的更新经由 cache-buster 准实时可达。
-2. 可用 `https://purge.jsdelivr.net/gh/<仓库>@main/<路径>` 手动刷新 jsDelivr 缓存。
-   用 `feedUrl` 设置可把源指向任意 URL（含 `{repo}` 占位符），本地测试时指向一个
-   静态文件服务器即可。
+**jsDelivr 的新鲜度没有 cache-buster 那么可靠**（2026-09-26 实测）。请求确实自动带上
+分钟级 `?ofm=` 参数，但 jsDelivr 把 `@main` 这类**分支引用**的"分支 → commit"解析放在
+单独一层缓存里，查询串不进这一层。实测：推送 v1.2.2 之后，jsDelivr 仍返回 v1.2.1 的清单
+（连 `README.md` 的字节数都是上一版的）和 v1.2.1 的公告；显式 purge 之后两者立刻变成
+v1.2.2。
+
+后果要具体说：在 raw 走不通、只能靠 jsDelivr 的网络上，旧版本用户拿到的是**过期清单**，
+于是「检查更新」回答"已是最新"，一键升级根本不会出现，新公告也收不到。这与 issue #1 是
+同一类失败，只是往下一层。新仓库的首次收录也有延迟（创建 Release 会触发它）。
+
+所以发布流程的最后一步是 purge；不做就要等 CDN 自己重解析，通常数小时：
+
+```bash
+curl "https://purge.jsdelivr.net/gh/<仓库>@main/feed/manifest.json"
+curl "https://purge.jsdelivr.net/gh/<仓库>@main/feed/announcements.json"
+```
+
+用 `feedUrl` 设置可把源指向任意 URL（含 `{repo}` 占位符），本地测试时指向一个静态文件
+服务器即可。
 
 ---
 
@@ -137,21 +155,41 @@ fetched hours earlier cannot be used to vouch for bytes that changed since.
 
 ## Source order and network reality
 
-Sources are tried `jsDelivr → raw.githubusercontent(main) → (master)`, falling
-back to the last cached copy with the error reported honestly when all fail.
-jsDelivr leads because raw.githubusercontent is hijacked by a local reverse proxy
-on some networks (measured: a CN egress with a Watt Toolkit-style accelerator) —
-`git push` works while raw answers a false 404 for a new file. jsDelivr's edge is
-reachable directly and every request carries a minute-resolution cache-buster, so
-CDN long-caching cannot hold freshness back.
+The actual order is `raw.githubusercontent(main) → jsDelivr(@main) → raw(master)`,
+falling back to the last cached copy with the error reported honestly when all
+fail. Take the **array order** in `src/feed.js` and `src/updater.js` as the truth:
+their comments still say "jsDelivr first", which is an older claim the arrays do
+not match.
 
-Two things a publisher should know:
+raw leads because it is authoritative and uncached — push, and it is immediately
+readable. But on some networks (measured: a CN egress with a Watt Toolkit-style
+accelerator) raw does not work at all: `git push` succeeds while raw answers a
+false 404 for a new file, or fails TLS outright
+(`UNABLE_TO_VERIFY_LEAF_SIGNATURE`). On those networks jsDelivr is the only
+source, which makes the next part matter.
 
-1. **jsDelivr's first index of a new repository lags** (minutes to hours; creating
-   a Release triggers it). Until it lands, freshly pushed announcements/updates
-   are briefly unfetchable (the client shows its cache and names the source as
-   unreachable). Indexing happens once; after that `@main` updates are
-   near-real-time through the cache-buster.
-2. `https://purge.jsdelivr.net/gh/<repo>@main/<path>` purges the jsDelivr cache by
-   hand. The `feedUrl` setting can point the source at any URL (with a `{repo}`
-   placeholder) — point it at a static file server for local testing.
+**jsDelivr's freshness is not as reliable as the cache-buster suggests** (measured
+2026-09-26). Requests do carry a minute-resolution `?ofm=`, but jsDelivr caches
+the *branch → commit* resolution for a branch ref like `@main` in a separate
+layer that the query string does not reach. Measured: after pushing v1.2.2,
+jsDelivr still served the v1.2.1 manifest (down to the previous `README.md` byte
+count) and the v1.2.1 announcement; an explicit purge changed both to v1.2.2
+immediately.
+
+What that costs, concretely: on a network where raw is unreachable and jsDelivr is
+all there is, an older user fetches the **stale manifest**, so "check for updates"
+answers "already latest" — the one-click upgrade never even appears, and a new
+announcement never arrives. That is the same class of failure issue #1 was about,
+one layer down. A new repository's first index lags too (creating a Release
+triggers it).
+
+So the last step of a release is a purge; skip it and the CDN re-resolves on its
+own in a matter of hours:
+
+```bash
+curl "https://purge.jsdelivr.net/gh/<repo>@main/feed/manifest.json"
+curl "https://purge.jsdelivr.net/gh/<repo>@main/feed/announcements.json"
+```
+
+The `feedUrl` setting can point the source at any URL (with a `{repo}`
+placeholder) — point it at a static file server for local testing.

@@ -1,13 +1,13 @@
 {
   "version": "1.2.2",
   "base": "../",
-  "publishedAt": "2026-09-25T20:37:15.604Z",
+  "publishedAt": "2026-09-26T01:32:41.610Z",
   "notes": "修复：应用内升级（1.2.1 的清单与实际文件不一致，旧版本点一键升级必然在校验阶段失败）；思考关不掉的模型三档预算翻倍（4096/16384/上限），长回答不再频繁被截断；探测判定不可用的模型不再出现在模型选择器与模型探测结果里；只声明 llm 依赖，没有 web server 的 composition（dsh-tui）也能加载；转发端口按 OpenAI 字段回报 usage，被拒绝的回合不再返回空的 200。",
   "files": [
     {
       "path": "client.js",
-      "size": 105930,
-      "sha256": "34dad8b96de9d32d736a34f5637456f26baab7f23090035af6f8be0dd2f7acfc"
+      "size": 107555,
+      "sha256": "f9cc60f53af6b9f4cd286420803366e968f61a692b142a792881c51f6fd55f55"
     },
     {
       "path": "cordis.patch.yml",
@@ -96,8 +96,8 @@
     },
     {
       "path": "src/probe.js",
-      "size": 7268,
-      "sha256": "bb1ba68638e0c58ee091df0a7436065b799606f75fca5a5ea8923e38b7465347"
+      "size": 7990,
+      "sha256": "9c67525e9fab3efd9ab75e5da0ddd393267b62e01eccca05b87b314f83b5b64f"
     },
     {
       "path": "src/push.js",

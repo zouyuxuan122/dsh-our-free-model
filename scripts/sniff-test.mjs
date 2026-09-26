@@ -239,6 +239,24 @@ check('a 5xx probes as nothing-learned', (await probeModel(entryOf('mimo-v2.6-fl
 scripts.set('mimo-v2.6-flash-free', { contentType: 'application/json', status: 404, body: JSON.stringify({ error: { message: 'No such model' } }) })
 check('a 404 on the id probes as unavailable', (await probeModel(entryOf('mimo-v2.6-flash-free'))).state, 'unavailable')
 
+// The verdict is the status, not the reason phrase. Every reverse proxy answers a
+// 503 with "Service Unavailable", and the message fallback read that as the
+// gateway naming this model — so an overloaded gateway silently emptied the
+// picker one model at a time, and each one stayed out until the next round.
+scripts.set('mimo-v2.6-flash-free', { contentType: 'application/json', status: 503, body: JSON.stringify({ error: { message: 'Service Unavailable' } }) })
+check('a 503 spelled "Service Unavailable" is still nothing-learned', (await probeModel(entryOf('mimo-v2.6-flash-free'))).state, 'unknown')
+scripts.set('mimo-v2.6-flash-free', { contentType: 'text/html', status: 503, body: '<html><head><title>503 Service Unavailable</title></head></html>' })
+check('and so is a plaintext proxy page', (await probeModel(entryOf('mimo-v2.6-flash-free'))).state, 'unknown')
+// The line is between a reason phrase and a verdict, not between statuses: a
+// body that names the model refused is the gateway answering about the model,
+// and the classifier's own reading of it is still honoured under a 5xx.
+scripts.set('mimo-v2.6-flash-free', { contentType: 'application/json', status: 503, body: JSON.stringify({ error: { type: 'ModelError', message: 'Model is unavailable' } }) })
+check('a 5xx that names the model is still a refusal', (await probeModel(entryOf('mimo-v2.6-flash-free'))).state, 'unavailable')
+// …while a refusal the classifier did not name, arriving under a 200 envelope,
+// still has to be read — that is what the fallback is for.
+scripts.set('mimo-v2.6-flash-free', { contentType: 'application/json', status: 200, body: JSON.stringify({ error: { message: 'no such model: mimo-v2.6-flash-free' } }) })
+check('a 200 envelope naming the model still probes as unavailable', (await probeModel(entryOf('mimo-v2.6-flash-free'))).state, 'unavailable')
+
 server.close()
 console.log(failures === 0 ? '\nsniff: the body decides, and the stream survives looking at it' : `\n${failures} check(s) failed`)
 process.exitCode = failures === 0 ? 0 : 1

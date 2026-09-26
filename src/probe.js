@@ -114,6 +114,9 @@ function buildPing(modelId, wire) {
  *   common thing an overloaded pooled account says, and this lane's own history
  *   has it returning 5xx for reasons that had nothing to do with the model
  *   (`src/effort.js` records an upstream 503 from an unknown request field).
+ *   Its *words* must not be read as a verdict either: a reverse proxy answers a
+ *   503 with the reason phrase "Service Unavailable", and matching that text
+ *   took a working model out of the picker.
  * - 401/403/407 is the pooled credential, and 408/425/429 is capacity or
  *   transport — the next window can answer.
  * - no status at all (transport, abort, timeout, a stream that died before any
@@ -132,7 +135,15 @@ function stateOf(error) {
     default: break
   }
   const message = String(error?.message ?? '')
-  if (error?.unavailable === true || /unavailable|not supported|no such model|unknown model|invalid model/i.test(message)) return STATE.unavailable
+  // The message match is a fallback for a refusal the classifier did not name
+  // ("no such model", "unknown model"), so it may only speak when the status did
+  // not already answer on the gateway's behalf: 503 is spelled "Service
+  // Unavailable" by every reverse proxy, and reading that reason phrase as the
+  // gateway naming this model dropped a working model until the next round.
+  const gatewayTrouble = Number.isInteger(error?.status) && error.status >= 500
+  const named = error?.unavailable === true
+    || (!gatewayTrouble && /unavailable|not supported|no such model|unknown model|invalid model/i.test(message))
+  if (named) return STATE.unavailable
   if (Number.isInteger(error?.status) && ROUTING_REFUSAL_STATUS.has(error.status)) return STATE.unavailable
   return STATE.unknown
 }

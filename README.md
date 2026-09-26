@@ -168,63 +168,6 @@ POST /v1/responses
 在应用内完成（下载 → 校验 → 备份 → 替换 → 热重载），不需要重新安装，也不需要
 重启应用。升级失败会自动恢复上一个版本并给出原因。
 
-## 给仓库主人：如何推送公告与发布更新
-
-一切通过插件仓库根目录下的 `feed/` 目录完成，推送即发布：
-
-**推送公告**：编辑 [`feed/announcements.json`](feed/announcements.json)，往
-`announcements` 数组加一条：
-
-```json
-{
-  "id": "2026-10-01-something",        // 全局唯一，出现过的 id 不会重复提醒
-  "title": "一句话标题",
-  "level": "info",                     // info | update | warn | urgent
-  "pinned": false,                     // 可选，置顶
-  "createdAt": "2026-10-01T00:00:00Z",
-  "expiresAt": "2026-10-15T00:00:00Z", // 可选，过期自动消失
-  "link": { "url": "https://…", "label": "查看详情" },  // 可选
-  "html": "<p>正文，<strong>支持受限白名单的 HTML</strong></p>"
-}
-```
-
-`urgent` 会触发全屏弹窗。正文 HTML 由客户端白名单渲染器解析——脚本、事件属性、
-`javascript:` URL、iframe 等一律被丢弃（测试见 `scripts/sanitize-test.mjs`），
-所以仓库被篡改也不会变成代码执行。
-
-**发布新版本**：改完代码后——
-
-```bash
-# 1. 修改 package.json 的 version
-# 2. 重新生成清单（把每个发布文件的字节数与 SHA-256 写进 feed/manifest.json）
-node scripts/build-manifest.mjs
-# 3. 确认清单与实物一致（不一致就非零退出；已接进 npm test）
-node scripts/build-manifest.mjs --check
-# 4. 提交并推送
-```
-
-第 2 步不是可选项：清单是发布者对每个文件的**字节数与 SHA-256 的承诺**，改了发布文
-件却没重跑，客户端就会下到新文件、拿旧哈希去校验，校验机制会（正确地）拒绝安装——于
-是这一版的一键升级对所有旧版本用户都失败。`--check` 就是让这种事在提交前失败。
-
-已安装的插件会按 `updateCheckHours`（默认 6 小时）自动发现新版本并推送通知；
-用户确认后下载、校验、备份、替换、热重载全部在应用内完成。清单会校验每个文件的
-SHA-256，并在安装前重新拉取一次，避免用陈旧清单校验新文件。
-
-**关于源顺序与网络现实**：插件按 `jsDelivr → raw.githubusercontent(main) → (master)`
-的顺序拉取，全部失败时降级到上一次的缓存并如实标注错误。jsDelivr 优先是因为
-raw.githubusercontent 在部分网络（实测本机 CN 出口 + Watt Toolkit 类加速工具）会被
-本地反代劫持——git push 正常但 raw 对新文件返回假 404；jsDelivr 的边缘节点直连可达，
-请求自动附带分钟级 cache-buster，不会被 CDN 长缓存拖住新鲜度。
-
-两个发布者须知：
-1. **jsDelivr 对新仓库的首次收录有延迟**（几分钟到数小时不等，创建 Release 会触发
-   收录）；收录完成前，新推送的公告/更新会暂时拉取不到（客户端显示缓存并标注
-   源不可达）。收录只发生一次，之后 `@main` 的更新经由 cache-buster 准实时可达。
-2. 可用 `https://purge.jsdelivr.net/gh/<仓库>@main/<路径>` 手动刷新 jsDelivr 缓存。
-   用 `feedUrl` 设置可把源指向任意 URL（含 `{repo}` 占位符），本地测试时指向一个
-   静态文件服务器即可。
-
 ## 实现结构
 
 ```text
@@ -334,6 +277,7 @@ reasoning token 从分子里剔掉，`decodeWindow()` 拒掉短到没法计时�
 | 本轮复审：设置入口没做类型检查 | 离线 `picker-test.mjs` + `effort-test.mjs` | `probeIntervalMinutes:'abc'` → `Math.max(1,'abc')` 是 NaN，而 `setTimeout(fn, NaN)` 在 Node 里等价于 1 ms：一秒一整轮全量探测。`defaultMaxTokens:0`（把设置页输入框清空就会发 0）→ `min(容量, 0)`，每一轮都被裁到 512 token，而选择器照旧印着 4 K/16 K/32 K 的梯子。现在数值项在 `POST /settings` 入口和取用处各设一道，非正值一律按"没设过"回落。同一批断言还钉住转发端口**只能绑回环**（`0.0.0.0` 直接 400 并写明原因），以及 `connection` 的准入决定是**逐请求**读的（改回 apply 时一次快照 → 那条 401 断言当场变红） |
 | 本轮复审：三条"看起来在测"的套件 | 变异测试（临时副本里逐条改回旧行为） | `retry-safety-test.mjs` 的四个用例全都落在"模型不在清单上"的提前返回（传的是 `model:"our-free-model/test-model-free"`，而 `baseModelId` 只剥 label 不剥路由），一个请求都没发出去过——改成真实调用后 7 个用例逐个钉住 code／可否重试／是否触发区域重探。`tui-test.mjs` 的 unref 断言比的是两个不同总体的计数（把 120 s 循环的 `unref()` 去掉仍然全绿）→ 改为按周期逐个核对。写死在套件里的端口（tui 的 18931）与另一个进程抢同一个端口时，表现为 180 s 静默挂死、打印出来的"失败详情"是六行 `ok` → 端口取自临时端口段，runner 加 60 s 硬超时并如实说明"它挂住了" |
 | usage 计数干净 | 离线 `retry-safety-test.mjs` | 没有 `prompt_tokens_details` 的 usage 不再把 `inputTokens` 算成 `NaN`；转发端口按 `prompt_tokens/completion_tokens` 回报，被网关拒绝的转发请求返回错误而不是空的 200。Messages 线上 `message_delta` 只带 output 一侧，旧写法把整条 usage 记录覆盖掉、每个 Claude 回合的 prompt tokens 记成 0；现在按字段合并 |
+| 本轮复审：5xx 的原因短语不再被当成判定（issue #3 的同类回归） | 离线 `sniff-test.mjs` + 反向验证 | `stateOf` 的消息兜底匹配不看状态，而反向代理给 503 的标准原因短语就是 `Service Unavailable`——过载的网关于是被读成"点名拒绝了这个模型"，模型一个个从选择器里消失（issue #3 修掉的代价从消息兜底那条路回来了）。现在这条兜底只在状态没能替网关回答时才出声；响应体里点名模型的（含 5xx 下的 `type: ModelError`）仍算拒绝。新增 4 条断言，还原旧实现后其中 2 条立刻变红 |
 
 ### 上一轮：v1.1.2（公告、升级、热重载与信任围栏）
 

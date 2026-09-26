@@ -1,7 +1,7 @@
 {
   "version": "1.2.2",
   "base": "../",
-  "publishedAt": "2026-09-26T01:32:41.610Z",
+  "publishedAt": "2026-09-26T01:40:05.584Z",
   "notes": "修复：应用内升级（1.2.1 的清单与实际文件不一致，旧版本点一键升级必然在校验阶段失败）；思考关不掉的模型三档预算翻倍（4096/16384/上限），长回答不再频繁被截断；探测判定不可用的模型不再出现在模型选择器与模型探测结果里；只声明 llm 依赖，没有 web server 的 composition（dsh-tui）也能加载；转发端口按 OpenAI 字段回报 usage，被拒绝的回合不再返回空的 200。",
   "files": [
     {
@@ -46,13 +46,13 @@
     },
     {
       "path": "README_EN.md",
-      "size": 39871,
-      "sha256": "5e9f8f3018793ac25163c5c8b4f1730219231926f26dcd9accb8b543cf2e730f"
+      "size": 38621,
+      "sha256": "7f1cfc32c69bb7f8710bb7436fd69d7388b99493877fbcd4b430ae9b8977fe6c"
     },
     {
       "path": "README.md",
-      "size": 39209,
-      "sha256": "e322ec5cc5da43db8436fd07eb1cc43ceb7ed52fde37e6f334a328a6920170cb"
+      "size": 36650,
+      "sha256": "28bf54f582bdf66a189fddf47955c7191feb91e8a5e981b43c19f99fe8f74175"
     },
     {
       "path": "src/adapter.js",

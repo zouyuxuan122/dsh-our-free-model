@@ -184,53 +184,6 @@ also get system-level toasts.
 (download → verify → backup → replace → hot reload); no reinstall, no restart.
 A failed upgrade restores the previous version and reports why.
 
-## For the repository owner: pushing announcements and releases
-
-Everything lives in the repository's `feed/` directory — pushing is publishing:
-
-**Push an announcement** by editing [`feed/announcements.json`](feed/announcements.json):
-
-```json
-{
-  "id": "2026-10-01-something",        // unique; a seen id never re-alerts
-  "title": "One-line title",
-  "level": "info",                     // info | update | warn | urgent
-  "pinned": false,                     // optional
-  "createdAt": "2026-10-01T00:00:00Z",
-  "expiresAt": "2026-10-15T00:00:00Z", // optional
-  "link": { "url": "https://…", "label": "Read more" },
-  "html": "<p>Body with <strong>allowlisted HTML</strong></p>"
-}
-```
-
-`urgent` opens a full-screen modal. Bodies are rendered by a client-side
-allowlist parser — scripts, event handlers, `javascript:` URLs, iframes and
-friends are all dropped (see `scripts/sanitize-test.mjs`), so a compromised
-repository does not become code execution.
-
-**Release a new version**:
-
-```bash
-# 1. bump `version` in package.json
-# 2. regenerate the manifest (size + SHA-256 of every published file)
-node scripts/build-manifest.mjs
-# 3. confirm the manifest matches the tree (non-zero exit otherwise; part of npm test)
-node scripts/build-manifest.mjs --check
-# 4. commit and push
-```
-
-Step 2 is not optional. The manifest is the publisher's promise about every file's
-byte count and SHA-256: edit a published file and skip the rebuild, and a client
-downloads the *new* file while verifying it against the *old* hash — verification
-then correctly refuses to install, and the one-click upgrade is broken for every
-user on an older version. `--check` is what makes that fail before a commit
-instead of in the field.
-
-Installed plugins discover the new release automatically (every
-`updateCheckHours`, 6 by default) and notify the user; the upgrade itself runs
-in-app, and the manifest is re-fetched right before installing so a document
-fetched hours earlier cannot be used to vouch for bytes that changed since.
-
 ## How it works
 
 ```text
@@ -357,6 +310,7 @@ row.
 | This round, at the settings boundary | offline, `picker-test.mjs` + `effort-test.mjs` | `probeIntervalMinutes:'abc'` made `Math.max(1,'abc')` = NaN, and Node treats `setTimeout(fn, NaN)` as 1 ms — a full catalog probe every second. `defaultMaxTokens:0` (which is what clearing the settings-page field posts) became `min(capacity, 0)`, cutting every turn to the 512-token floor while the picker went on printing its 4 K/16 K/32 K ladder. Numbers are now coerced both where they are written and where they are read, and a non-positive value means "unset". The same assertions pin the forward listener to a loopback bind (`0.0.0.0` is refused with a 400 that says why) and pin that `connection` admission is read **per request**: patch the snapshot back in and the late-mount 401 check goes red on the spot |
 | This round, three suites that only looked like tests | mutation check (revert one fix per throwaway copy) | `retry-safety-test.mjs`'s four cases all landed on the "model not on this route" early return — it passed `model:"our-free-model/test-model-free"`, and `baseModelId` strips a label, not a route — so the suite had never sent a request; against real calls its 7 cases now pin the code, whether it may be retried, and whether the region re-probe fired. `tui-test.mjs` compared the *counts* of two different populations, so deleting the 120 s loop's `unref()` stayed green; it now checks each period individually. And the hard-coded port in `tui` became an ephemeral one after it hung for 180 s against somebody else's listener |
 | Usage accounting | offline, `retry-safety-test.mjs` | A `usage` object without `prompt_tokens_details` no longer computes `inputTokens: NaN`; the forward port answers in `prompt_tokens/completion_tokens` and reports a refused turn as an error instead of an empty 200. On the Messages wire `message_delta` carries only the output side, and the old whole-record overwrite zeroed the prompt tokens of every Claude turn; records are now merged field by field |
+| This round: a 5xx reason phrase is no longer read as a verdict (the same regression issue #3 was about) | offline, `sniff-test.mjs` + revert check | `stateOf` matched its message fallback without regard for the status, and "Service Unavailable" is the reason phrase every reverse proxy answers a 503 with — so an overloaded gateway was read as the gateway naming each model refused, and those models left the picker one at a time (the cost issue #3 removed, back through the message fallback). The fallback now only speaks when the status has not already answered for the gateway; a body that names the model — including `type: ModelError` under a 5xx — is still a refusal. Four new assertions, two of which go red the moment the old implementation is restored |
 
 ### v1.1.2 (announcements, in-app upgrades, hot reload, trust fence)
 

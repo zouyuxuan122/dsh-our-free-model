@@ -539,12 +539,22 @@ window.__ModuleLoader__.load({
     const SEASON = ['#4C8DFF', '#3ECFA0', '#F2A65A', '#E36AA6', '#8B7BF0', '#39B8C4', '#D9743E', '#7BB24A']
 
     async function api(path, options) {
-      const response = await fetch(`${API}${path}`, { ...options, redirect: 'error' })
-      const text = await response.text()
-      let payload
-      try { payload = text === '' ? {} : JSON.parse(text) } catch { payload = { error: text.slice(0, 200) } }
-      if (!response.ok) throw new Error(payload?.error ?? `HTTP ${response.status}`)
-      return payload
+      // 8 秒超时兜底：后端路由未注册/挂起时 fetch 不再永久挂起——此前全部 api 调用
+      // （onboarding /announcement、设置页 /announcements /update/status、面板 /summary /stats
+      // /forward/key 等）无任何超时，一个不响应端点即可阻塞 settings.onboarding 协调流程
+      // 并长期占用同源连接池。超时按 AbortError 抛给调用方，走各自 .catch 降级路径。
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), 8000)
+      try {
+        const response = await fetch(`${API}${path}`, { ...options, redirect: 'error', signal: ctrl.signal })
+        const text = await response.text()
+        let payload
+        try { payload = text === '' ? {} : JSON.parse(text) } catch { payload = { error: text.slice(0, 200) } }
+        if (!response.ok) throw new Error(payload?.error ?? `HTTP ${response.status}`)
+        return payload
+      } finally {
+        clearTimeout(timer)
+      }
     }
 
     const post = (path, body) => api(path, {
@@ -1537,7 +1547,16 @@ window.__ModuleLoader__.load({
         const open = () => {
           if (disposed) return
           source = new EventSource(`${API}/events`)
+          // 断连保护：服务端不可达时 EventSource 默认无限自动重连（持续占连接池）；
+          // 连续失败达到上限 → 关闭停止重连，避免长期占用同源连接。
+          let errCount = 0
+          source.onopen = () => { errCount = 0 }
+          source.onerror = () => {
+            errCount += 1
+            if (errCount >= 5) { try { source.close() } catch { /* 已关闭 */ } }
+          }
           source.addEventListener('announcements', event => {
+            errCount = 0
             let data
             try { data = JSON.parse(event.data) } catch { return }
             for (const item of data.items ?? []) {
@@ -1643,7 +1662,13 @@ window.__ModuleLoader__.load({
           .then(payload => { if (alive) setAck(payload) })
           .catch(() => { if (alive) setAck({ acknowledged: true, version: '' }) })
         api('/summary').then(payload => { if (alive) setSummary(payload) }).catch(() => {})
-        return () => { alive = false }
+        // 超时兜底：3 秒拿不到 ack（后端挂起/超时/异常）→ 当作已 ack 主动放行——
+        // 本组件是 settings.onboarding 协调器最先执行的 step（order:-50），complete 依赖 ack；
+        // ack 永远 undefined 会永久卡住 onboarding 流程（连带阻塞后续 step 与主题启动画面）。
+        const timer = setTimeout(() => {
+          if (alive) setAck(current => current ?? { acknowledged: true, version: '' })
+        }, 3000)
+        return () => { alive = false; clearTimeout(timer) }
       }, [])
       const acknowledged = ack?.acknowledged === true && explicit !== true
       useEffect(() => {

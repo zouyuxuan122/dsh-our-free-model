@@ -78,6 +78,27 @@ export class FreeModelAdapter {
     })
   }
 
+  /**
+   * Resolve provider-side request-image pricing for one exact model route.
+   *
+   * The harness base class supplies a default no-op returning `undefined`
+   * (meaning "this route declares no image pricing"); this adapter deliberately
+   * extends no version-pinned base class so it can mount on several kernel lines,
+   * so it has to provide that default itself. Without it,
+   * `ctx.llm.imageRequestPricing()` forwards to a missing method and token
+   * measurement — and therefore compaction — throws.
+   *
+   * Must stay synchronous: the token meter resolves it per measurement, with no
+   * I/O window (issue #42).
+   *
+   * @param {string} _provider - a route passed to `registerAdapter()` for this instance.
+   * @param {string} _model - exact model id passed to GenerateOptions.model.
+   * @returns always `undefined`: the free egress quotes no per-image price.
+   */
+  imageRequestPricing(_provider, _model) {
+    return undefined
+  }
+
   /** Models this route advertises right now. */
   async listModels(provider) {
     const state = this.deps.state()

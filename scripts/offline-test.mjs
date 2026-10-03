@@ -76,6 +76,17 @@ const dataDir = home => path.join(home, 'our-free-model')
   check('the plugin activates with the gateway unreachable', adapter !== undefined, true)
   check('and registers the model lane', ctx.__captured.routes.includes(ROUTE_MAIN), true)
 
+  // The harness forwards to these by name with no guard (`adapters.get(provider)
+  // ?.adapter.<method>`), and `?.` cannot short-circuit because registration
+  // succeeded. A method missing here is a TypeError at first use — for
+  // `imageRequestPricing` that is every token measurement, which silently kills
+  // auto- and manual compaction while the UI keeps no error (issue #42).
+  for (const method of ['providerInfo', 'providerRetryPolicy', 'imageRequestPricing', 'listModels', 'resolveModel', 'prepareCall', 'stream']) {
+    check(`the adapter answers the contract method ${method}()`, typeof adapter?.[method], 'function')
+  }
+  check('imageRequestPricing declares no per-image price for this free lane',
+    adapter?.imageRequestPricing(ROUTE_MAIN, 'any-model-free'), undefined)
+
   const models = await adapter.listModels(ROUTE_MAIN)
   check('the fallback roster is advertised with no network and no key', models.length > 0, true)
 

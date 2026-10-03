@@ -271,8 +271,8 @@ function userAgentWith(attribution) {
   return attribution.includes('opencode/') ? attribution : `${attribution} ${CLIENT_UA}`
 }
 
-export async function postStreamed({ path, body, session, requestId, attributionUserAgent, signal, onData, timeoutMs = 300000 }) {
-  const headers = gatewayHeaders({ session: truncateSession(session), requestId, stream: true })
+export async function postStreamed({ path, body, session, requestId, attributionUserAgent, deviceIp, signal, onData, timeoutMs = 300000 }) {
+  const headers = gatewayHeaders({ session: truncateSession(session), requestId, stream: true, deviceIp })
   headers['user-agent'] = userAgentWith(attributionUserAgent)
   let response
   try {

@@ -263,6 +263,15 @@ try {
     })
   }
 
+  await check('deviceIp 贯穿真 adapter 到网关的 x-forwarded-for，缺失时不添加该头', async () => {
+    const model = REPRESENTATIVES[0]
+    const wire = wireFor(model)
+    const withIp = await drive(model, [{ body: deltas(wire, { text: ANSWER }) + terminal(wire) }], { options: { deviceIp: '198.51.100.23' } })
+    assert.equal(withIp.scenario.requests[0].headers['x-forwarded-for'], '198.51.100.23', 'deviceIp 必须变成网关上的 x-forwarded-for')
+    const withoutIp = await drive(model, [{ body: deltas(wire, { text: ANSWER }) + terminal(wire) }])
+    assert.ok(!('x-forwarded-for' in withoutIp.scenario.requests[0].headers), '无 deviceIp 时出站头必须与从前一致')
+  })
+
   for (const model of REPRESENTATIVES) {
     const wire = wireFor(model)
     for (const [label, delta] of [['正文', { reasoning: CHECKPOINT, text: 'partial answer' }], ['工具名', { reasoning: CHECKPOINT, toolName: TOOL.name }], ['工具参数', { reasoning: CHECKPOINT, toolArgs: '{"x":1}' }]]) {

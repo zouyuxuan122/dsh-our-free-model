@@ -232,6 +232,138 @@ export async function bindForwardPort(server, { address, port, attempts = BIND_A
 }
 
 /**
+ * PROXY protocol v1, the one-line handshake the LAN relay opens each forwarded
+ * connection with. Loopback placement is what keeps the claim honest: nothing
+ * outside this machine can reach the forward listener to assert a source
+ * address, so a parsed header can only have come from the relay. Traffic
+ * that never looks like the handshake passes through as-is; a line that
+ * claims the handshake and then lies is dropped before the parser sees it.
+ *
+ * @see https://www.haproxy.org/download/1.8/doc/proxy-protocol.txt
+ */
+const PROXY_V1_MAX_BYTES = 108 // the spec's ceiling, CRLF included
+const PROXY_V1_PROBE_TIMEOUT_MS = 2000 // a handshake slower than this is not a relay
+
+/** IPv4-mapped IPv6 spellings (`::ffff:192.168.1.7`) carry a v4 address. */
+function bareAddress(ip) {
+  const text = String(ip ?? '')
+  return text.startsWith('::ffff:') ? text.slice(7) : text
+}
+
+/**
+ * The PROXY v1 line for one relayed connection: the device that dialed the
+ * relay — or, when a public tunnel spoke first, the one its own PROXY line
+ * claimed — is the source; this machine's relay-side endpoint the
+ * destination. An address family that does not match across the pair claims
+ * nothing (`UNKNOWN`), except that a claimed device keeps its family: the
+ * destination then falls back to that family's loopback, because the line
+ * must stay well-formed for the listener to read the device at all.
+ */
+function proxyHeaderV1(socket) {
+  const claimed = socket.ofmDevice
+  const src = bareAddress(claimed?.address ?? socket.remoteAddress)
+  const dst = bareAddress(socket.localAddress)
+  const srcFamily = net.isIP(src)
+  const dstFamily = net.isIP(dst)
+  const finalDst = srcFamily && dstFamily && srcFamily !== dstFamily
+    ? (srcFamily === 4 ? '127.0.0.1' : '::1')
+    : dst
+  const family = srcFamily && srcFamily === net.isIP(finalDst) ? srcFamily : 0
+  const srcPort = claimed?.port ?? socket.remotePort
+  if (!family || !srcPort || !socket.localPort) return 'PROXY UNKNOWN\r\n'
+  const proto = family === 4 ? 'TCP4' : 'TCP6'
+  return `PROXY ${proto} ${src} ${finalDst} ${srcPort} ${socket.localPort}\r\n`
+}
+
+/**
+ * Parse one PROXY v1 line (CRLF already stripped). Returns `{device: null}`
+ * for a well-formed header that attributes nothing (`PROXY UNKNOWN`), or
+ * `null` when the line is malformed and the connection should be dropped.
+ */
+function parseProxyV1(line) {
+  const parts = line.split(' ')
+  if (parts[0] !== 'PROXY') return null
+  if (parts[1] === 'UNKNOWN') return { device: null } // the tail is the sender's to invent
+  if ((parts[1] === 'TCP4' || parts[1] === 'TCP6') && parts.length !== 6) return null
+  if (parts[1] !== 'TCP4' && parts[1] !== 'TCP6') return null
+  const family = parts[1] === 'TCP4' ? 4 : 6
+  const [, , src, dst, srcPort, dstPort] = parts
+  const port = value => (Number.isInteger(Number(value)) && Number(value) >= 0 && Number(value) <= 65535 ? Number(value) : null)
+  const source = port(srcPort)
+  const destination = port(dstPort)
+  if (source === null || destination === null) return null
+  if (net.isIP(src) !== family || net.isIP(dst) !== family) return null
+  return { device: { address: src, port: source } }
+}
+
+/**
+ * Sniff a fresh connection for a PROXY v1 header before the HTTP parser can
+ * see it — the parser attaches its own data listener the moment the connection
+ * is handed over, so a `connection`-event hook would race it. Here the
+ * front door reads the first bytes itself, then hands the stream on
+ * untouched: every byte it looked at goes back with `socket.unshift()`, so the
+ * HTTP server parses from the very start of what arrived.
+ *
+ * `onReady(device)` fires exactly once — `device` is `null` for plain local
+ * traffic — or not at all when the connection dies or lies.
+ */
+function sniffProxyHeader(socket, log, onReady) {
+  let buffered = Buffer.alloc(0)
+  let probingHeader = false
+  let settled = false
+  const cleanup = () => {
+    socket.removeListener('data', onData)
+    socket.removeListener('error', onDead)
+    socket.removeListener('close', onDead)
+    socket.setTimeout(0)
+  }
+  const finish = device => {
+    if (settled) return
+    settled = true
+    cleanup()
+    if (buffered.length > 0) socket.unshift(buffered)
+    socket.ofmDevice = device
+    onReady(device)
+  }
+  const reject = reason => {
+    if (settled) return
+    settled = true
+    cleanup()
+    log(`forward: dropped a connection: ${reason}`)
+    socket.destroy()
+  }
+  function onDead() {
+    settled = true
+    cleanup()
+  }
+  const onData = chunk => {
+    if (settled) return
+    buffered = buffered.length > 0 ? Buffer.concat([buffered, chunk]) : chunk
+    if (!probingHeader) {
+      const sig = 'PROXY '
+      const head = buffered.toString('latin1', 0, Math.min(sig.length, buffered.length))
+      if (!sig.startsWith(head)) return finish(null) // plain local traffic
+      if (buffered.length < sig.length) return // prefix of `PROXY `, still deciding
+      probingHeader = buffered.toString('latin1', 0, sig.length) === sig
+      if (!probingHeader) return finish(null)
+    }
+    const end = buffered.indexOf('\r\n')
+    if (end >= 0) {
+      if (end + 2 > PROXY_V1_MAX_BYTES) return reject('an overlong PROXY header')
+      const parsed = parseProxyV1(buffered.toString('latin1', 0, end))
+      if (parsed === null) return reject('a malformed PROXY header')
+      buffered = buffered.subarray(end + 2)
+      return finish(parsed.device)
+    }
+    if (buffered.length >= PROXY_V1_MAX_BYTES) reject('an unterminated PROXY header')
+  }
+  socket.on('data', onData)
+  socket.once('error', onDead)
+  socket.once('close', onDead)
+  socket.setTimeout(PROXY_V1_PROBE_TIMEOUT_MS, () => reject('a connection that never finished its handshake'))
+}
+
+/**
  * Start the listener.
  *
  * @param {object} options
@@ -240,10 +372,10 @@ export async function bindForwardPort(server, { address, port, attempts = BIND_A
  *   runs one completion through the adapter and reports chunks as they arrive
  * @param {() => Array<{id: string, created: number, owned_by: string}>} options.modelRows
  * @param {(message: string) => void} [options.log]
- * @returns {Promise<{server: http.Server, port: number, close: () => Promise<void>}>}
+ * @returns {Promise<{server: net.Server, port: number, requestedPort: number, fellBack: boolean, bindError: {code: string, kind: string, message: string, hint: string}|null, host: string, close: () => Promise<void>}>}
  */
 export async function startForwardServer({ config, complete, modelRows, log = () => {}, heartbeatMs = SSE_HEARTBEAT_MS }) {
-  const server = http.createServer((req, res) => {
+  const httpServer = http.createServer((req, res) => {
     void handle(req, res).catch(error => {
       log(`request failed: ${error?.message ?? error}`)
       if (!res.headersSent) {
@@ -270,6 +402,10 @@ export async function startForwardServer({ config, complete, modelRows, log = ()
       res.end()
       return
     }
+    // Name the originator when the relay vouched for one, so a log line reads
+    // `192.168.1.7` instead of the relay's loopback socket.
+    const device = req.socket.ofmDevice
+    if (device) log(`forward: ${device.address}:${device.port} → ${req.method} ${path}`)
     // Liveness only, and deliberately before the key check: a caller probing
     // whether the port is up must not need the key to get an answer. It gets a
     // count of nothing — the model roster is what the authenticated routes serve.
@@ -300,16 +436,27 @@ export async function startForwardServer({ config, complete, modelRows, log = ()
   // past the loopback-only rule. The reported `host` below stays the configured
   // spelling: the settings reconciliation compares it, not the resolved IP.
   const bindAddress = await resolveLoopbackBind(config().host)
+  const sockets = new Set()
+  // The HTTP server cannot be the listener: its parser claims each connection
+  // the instant it appears, so a PROXY line would hit the parser as a broken
+  // request. This bare TCP front door reads the optional handshake first, then
+  // hands the stream over with `httpServer.emit('connection', socket)` — the
+  // same feed proxies have used since before http.Server had a knob for it.
+  const front = net.createServer(socket => {
+    sockets.add(socket)
+    socket.once('close', () => sockets.delete(socket))
+    sniffProxyHeader(socket, log, () => httpServer.emit('connection', socket))
+  })
   const requestedPort = Number.isFinite(Number(config().port)) ? Math.trunc(Number(config().port)) : 0
-  const bound = await bindForwardPort(server, { address: bindAddress, port: requestedPort, log: message => log(`bind: ${message}`) })
-  server.on('error', error => log(`listener error: ${error?.message ?? error}`))
+  const bound = await bindForwardPort(front, { address: bindAddress, port: requestedPort, log: message => log(`bind: ${message}`) })
+  front.on('error', error => log(`listener error: ${error?.message ?? error}`))
   if (bound.fellBack) {
     const verdict = classifyBindError(bound.bindError)
     log(`port ${bound.requested} is taken (${verdict.code}); listening on ${bound.port} instead${verdict.hint === '' ? '' : ` — ${verdict.hint}`}`)
   }
 
   return {
-    server,
+    server: front,
     port: bound.port,
     /** The port the settings asked for, which differs from `port` exactly when
      *  the bind had to move. */
@@ -320,8 +467,10 @@ export async function startForwardServer({ config, complete, modelRows, log = ()
     /** The address actually bound, so a caller can tell a restart from a no-op. */
     host: config().host || '127.0.0.1',
     close: () => new Promise(resolve => {
-      server.closeAllConnections?.()
-      server.close(() => resolve())
+      front.close(() => resolve())
+      httpServer.closeAllConnections?.()
+      httpServer.close(() => {})
+      for (const socket of sockets) socket.destroy()
     }),
   }
 }
@@ -362,15 +511,26 @@ const RELAY_HOP_HEADER = 'x-ofm-relay-hop'
  * @param {object} options
  * @param {() => {enabled: boolean, host: string, port: number, lanKey: string, localKey: string, targetPort: number}} options.config
  * @param {(message: string) => void} [options.log]
- * @returns {Promise<{server: http.Server, port: number, host: string, close: () => Promise<void>}>}
+ * @returns {Promise<{server: net.Server, port: number, host: string, close: () => Promise<void>}>}
  */
 export async function startLanRelay({ config, log = () => {} }) {
-  const server = http.createServer((req, res) => {
+  const httpServer = http.createServer((req, res) => {
     void relay(req, res).catch(error => {
       log(`lan relay request failed: ${error?.message ?? error}`)
       if (!res.headersSent) openAiError(res, 502, 'server_error', String(error?.message ?? error))
       else res.end()
     })
+  })
+  const sockets = new Set()
+  // The same front door the listener uses, one difference: this side already
+  // knows the device from the socket itself, so a PROXY line — which can only
+  // arrive here chained through a second relay by mistake — is parsed away
+  // and dropped, leaving the HTTP parser a clean request and the loop check
+  // (508) the answer it owes.
+  const front = net.createServer(socket => {
+    sockets.add(socket)
+    socket.once('close', () => sockets.delete(socket))
+    sniffProxyHeader(socket, log, () => httpServer.emit('connection', socket))
   })
 
   async function relay(req, res) {
@@ -407,6 +567,7 @@ export async function startLanRelay({ config, log = () => {} }) {
       openAiError(res, 404, 'not_found_error', `no route for ${req.method} ${path}`)
       return
     }
+    log(`lan relay: ${bareAddress(req.socket.ofmDevice?.address ?? req.socket.remoteAddress)} → ${path}`)
     const headers = { ...req.headers }
     delete headers.host
     delete headers.connection
@@ -415,12 +576,24 @@ export async function startLanRelay({ config, log = () => {} }) {
     // the key that belongs to this machine.
     headers.authorization = `Bearer ${settings.localKey}`
     headers[RELAY_HOP_HEADER] = '1'
+    // One loopback connection per relayed request, each opening with its own
+    // PROXY line. The non-pooling agent is the part that keeps addresses
+    // honest: a reused socket would carry the next device's request under
+    // whatever address the first one claimed.
+    const header = proxyHeaderV1(req.socket)
+    const agent = new http.Agent({ keepAlive: false })
+    agent.createConnection = options => {
+      const socket = net.connect(options)
+      socket.write(header) // queued ahead of the request bytes http writes next
+      return socket
+    }
     const target = http.request({
       host: '127.0.0.1',
       port: settings.targetPort,
       method: req.method,
       path: `${path}${url.search}`,
       headers,
+      agent,
     })
     target.on('response', upstream => {
       const relayed = { ...upstream.headers }
@@ -448,22 +621,24 @@ export async function startLanRelay({ config, log = () => {} }) {
   const host = String(desired.host ?? '').trim() || '0.0.0.0'
   const port = await new Promise((resolve, reject) => {
     const onError = error => reject(error)
-    server.once('error', onError)
+    front.once('error', onError)
     const wanted = Number(desired.port)
-    server.listen(Number.isFinite(wanted) && wanted > 0 ? Math.trunc(wanted) : 0, host, () => {
-      server.off('error', onError)
-      server.on('error', error => log(`lan relay error: ${error?.message ?? error}`))
-      resolve(server.address()?.port ?? 0)
+    front.listen(Number.isFinite(wanted) && wanted > 0 ? Math.trunc(wanted) : 0, host, () => {
+      front.off('error', onError)
+      front.on('error', error => log(`lan relay error: ${error?.message ?? error}`))
+      resolve(front.address()?.port ?? 0)
     })
   })
 
   return {
-    server,
+    server: front,
     port,
     host,
     close: () => new Promise(resolve => {
-      server.closeAllConnections?.()
-      server.close(() => resolve())
+      front.close(() => resolve())
+      httpServer.closeAllConnections?.()
+      httpServer.close(() => {})
+      for (const socket of sockets) socket.destroy()
     }),
   }
 }
@@ -485,7 +660,7 @@ async function serveCompletion(req, res, complete, endpoint, heartbeatMs) {
   res.once('close', abort)
   if (req.aborted || req.destroyed || socket?.destroyed) abort()
   try {
-    await endpoint(req, res, (request, onChunk) => complete({ ...request, signal: controller.signal }, onChunk), { heartbeatMs })
+    await endpoint(req, res, (request, onChunk) => complete({ ...request, signal: controller.signal, deviceIp: req.socket?.ofmDevice?.address ?? undefined }, onChunk), { heartbeatMs })
   } finally {
     req.removeListener('aborted', abort)
     socket?.removeListener('close', abort)

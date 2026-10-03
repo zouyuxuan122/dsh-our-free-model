@@ -135,7 +135,7 @@ export function wireFor(modelId) {
  * `Authorization: Bearer public` is the pooled免密 credential — there is no
  * per-user secret on this lane.
  */
-export function gatewayHeaders({ session, requestId, stream, accept }) {
+export function gatewayHeaders({ session, requestId, stream, accept, deviceIp }) {
   const headers = {
     'content-type': 'application/json',
     'authorization': 'Bearer public',
@@ -146,6 +146,11 @@ export function gatewayHeaders({ session, requestId, stream, accept }) {
     'x-opencode-project': 'global',
     'accept': accept ?? (stream ? 'text/event-stream' : '*/*'),
   }
+  // The device that dialed in (PROXY v1, behind the LAN relay or a public
+  // tunnel) — hand the gateway that address instead of this machine's.
+  // Local traffic carries no such claim and no header, so its shape on the
+  // wire is untouched.
+  if (typeof deviceIp === 'string' && deviceIp !== '') headers['x-forwarded-for'] = deviceIp
   return headers
 }
 

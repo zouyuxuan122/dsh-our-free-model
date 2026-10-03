@@ -583,6 +583,9 @@ export function apply(ctx, config) {
       ...typeof openAi.max_tokens === 'number' ? { maxTokens: openAi.max_tokens } : {},
       ...typeof openAi.reasoning_effort === 'string' ? { reasoningEffort: openAi.reasoning_effort } : {},
       sessionId: `forward:${String(openAi.user ?? openAi.conversation ?? 'shared')}`,
+      // The PROXY-claimed device, threaded to the gateway's x-forwarded-for;
+      // absent for local traffic, so its outbound shape stays as it was.
+      ...typeof request.deviceIp === 'string' && request.deviceIp !== '' ? { deviceIp: request.deviceIp } : {},
       signal: request.signal,
     }
 

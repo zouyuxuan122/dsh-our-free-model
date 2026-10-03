@@ -256,6 +256,7 @@ export class FreeModelAdapter {
         path: endpointFor(entry.id), body: payload, session,
         requestId: attempt === 0 ? recoveryId : mintRequestId(),
         attributionUserAgent: snapshot.attributionUserAgent,
+        deviceIp: options.deviceIp,
         signal: controller.signal,
         onData: value => channel.push(value),
       }).then(() => channel.push(undefined))

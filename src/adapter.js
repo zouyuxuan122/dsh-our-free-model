@@ -36,6 +36,20 @@ export const ROUTE_LABELS = {
 
 const STYLE_FOR_WIRE = { chat: 'chat', responses: 'flat', messages: 'claude' }
 
+/**
+ * Declare the host's in-history prompt-update route for this model's wire.
+ *
+ * chat and responses keep a system message exactly where it sits in the
+ * messages array, so a refreshed system snapshot appended after the cached
+ * history leaves the prefix through that history reusable. The messages wire
+ * folds every system block into one top-level field ahead of history, where
+ * the same snapshot would invalidate everything after it — declaring the
+ * capability there would buy a rewrite, not a cache hit.
+ */
+function systemPromptUpdateFor(modelId) {
+  return wireFor(modelId) === 'messages' ? {} : { systemPromptUpdate: 'in-history' }
+}
+
 export class FreeModelAdapter {
   /**
    * @param {object} dependencies
@@ -103,6 +117,7 @@ export class FreeModelAdapter {
         name: baseModelId(model),
         context: { contextWindow: 131072 },
         defaultMaxTokens: 8192,
+        ...systemPromptUpdateFor(baseModelId(model)),
       }
     }
     const ceiling = Math.min(entry.maxOutput, state.settings.defaultMaxTokens ?? 32768)
@@ -115,6 +130,7 @@ export class FreeModelAdapter {
       context: { contextWindow: entry.contextWindow },
       defaultMaxTokens: ceiling,
       ...efforts === undefined ? {} : { reasoning: { efforts, defaultEffort: DEFAULT_LEVEL } },
+      ...systemPromptUpdateFor(entry.id),
     }
   }
 

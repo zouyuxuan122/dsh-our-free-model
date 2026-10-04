@@ -24,7 +24,7 @@
 
 import { CLIENT_UA, UPSTREAM_BASE, gatewayHeaders, truncateSession } from './upstream.js'
 
-/** Harness-neutral failure codes (packages/llm/llm/src/error.ts vocabulary). */
+/** Harness-neutral failure codes (packages/llm/llm/src/error.ts vocabulary; CLIENT_ERROR extends it like CONFIG_DISABLED does). */
 export const CODE = {
   region: 'REGION_BLOCKED',
   quota: 'RATE_LIMIT',
@@ -32,6 +32,7 @@ export const CODE = {
   transport: 'TRANSPORT',
   timeout: 'TIMEOUT',
   server: 'SERVER',
+  client: 'CLIENT_ERROR',
   empty: 'EMPTY_RESPONSE',
   aborted: 'ABORTED',
 }
@@ -60,6 +61,15 @@ export function classifyFailure(status, payload, retryAfterMs) {
   if (status === 401 || status === 403) return new UpstreamError(message, CODE.credential, { status, type })
   if (type === 'ModelError' || /model is unavailable|not supported/.test(flat)) {
     return new UpstreamError(message, CODE.server, { status, type, unavailable: true })
+  }
+  // 4xx is the request's own fault: replaying the identical body reproduces the
+  // identical refusal, so it stays outside the harness's retryable set — which
+  // is why SERVER (retryable) must not be the fallback for it. 408 and 425 are
+  // the carve-out: they name the gateway's own timing trouble, and a re-send
+  // can answer differently. Out-of-band callers pass no status at all, so they
+  // keep falling through to SERVER below.
+  if (status >= 400 && status < 500 && status !== 408 && status !== 425) {
+    return new UpstreamError(message, CODE.client, { status, type })
   }
   return new UpstreamError(message, CODE.server, { status, type })
 }

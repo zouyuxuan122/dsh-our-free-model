@@ -437,6 +437,41 @@ await checkAsync('a frame with no thinking leaves the block empty', async () => 
   assert.equal(state.reasoningText, '')
 })
 
+// ── a tool call that names itself late ───────────────────────────────────────
+// The harness re-reads every chunk through a lossless-JSON snapshot before it
+// stores it: an own `name: undefined` field is not JSON, so the whole turn died
+// at the first argument delta. A wire that streams `id` and arguments before
+// the name (Claude-relays do) hit exactly that.
+const assertLossless = chunks => {
+  for (const chunk of chunks) {
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(chunk)), chunk,
+      `chunk is not losslessly JSON-serializable: ${JSON.stringify(chunk)}`)
+  }
+}
+
+await checkAsync('tool deltas whose name is still unknown stay lossless for the harness', async () => {
+  const { chunks } = await readChat([
+    chatFrame({ tool_calls: [{ index: 0, id: 'call_x', function: { arguments: '{"q"' } }] }),
+    chatFrame({ tool_calls: [{ index: 0, id: 'call_x', function: { name: 'mytool', arguments: ':1}' } }] }),
+  ])
+  assertLossless(chunks)
+  const deltas = chunks.filter(chunk => chunk.type === 'tool-call-delta')
+  assert.ok(deltas.some(delta => delta.name === 'mytool'), 'the delta that knows the name carries it')
+  assert.ok(deltas.every(delta => delta.name === undefined || typeof delta.name === 'string'),
+    'a delta may omit the name, but never carry a non-string one')
+  const end = chunks.find(chunk => chunk.type === 'block-end')
+  assert.equal(end?.block?.name, 'mytool')
+  assert.equal(end?.block?.arguments, '{"q":1}')
+})
+
+await checkAsync('a tool call that never learns its name still closes with a string name', async () => {
+  const { chunks } = await readChat([chatFrame({ tool_calls: [{ index: 0, id: 'call_y', function: { arguments: '{}' } }] })])
+  assertLossless(chunks)
+  const end = chunks.find(chunk => chunk.type === 'block-end')
+  assert.equal(typeof end?.block?.name, 'string', 'block-end must carry a string name')
+  assert.equal(end?.block?.id, 'call_y')
+})
+
 const fakeResponse = () => {
   const res = {
     writes: [],

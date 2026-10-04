@@ -38,6 +38,11 @@ const stub = await stubUpstream({
       // caller, and this is where a cancellation has to land.
       return { pieces: ['data: {"choices":[{"index":0,"delta":{"content":"partial"}}]}\n\n'], holdMs: 700 }
     }
+    if (model === 'refusal-model-free') {
+      // A request the gateway refuses before any stream opens: 4xx is the
+      // request's own fault, and re-sending the identical body reproduces it.
+      return { status: 400, body: JSON.stringify({ error: { type: 'invalid_request_error', message: 'messages: an assistant message with no content precedes tool calls.' } }) }
+    }
     return { body: chatFrames('fine') }
   },
 })
@@ -62,7 +67,7 @@ function isLosslessJson(value, seen = new Set()) {
   return Object.values(value).every(item => isLosslessJson(item, seen))
 }
 
-const MODELS = ['test-model-free', 'socket-model-free', 'region-model-free', 'quota-model-free', 'slow-model-free']
+const MODELS = ['test-model-free', 'socket-model-free', 'region-model-free', 'quota-model-free', 'slow-model-free', 'refusal-model-free']
 const CATALOG = MODELS.map(id => ({
   id, name: `Test ${id}`, availability: 'available',
   vision: false, reasoning: true, contextWindow: 128000, maxOutput: 8192,
@@ -129,6 +134,9 @@ const cases = [
   // retries turned one quota wall into three. A quota refusal now surfaces to
   // the harness immediately, the same way a geography refusal does.
   ['the free usage limit inside the stream', 'quota-model-free', {}, 'error', CODE.quota, false, undefined, false],
+  // A 4xx is the request's own fault: the same body sent again fails the same
+  // way, so the backoff scheduler must never be told this code is retryable.
+  ['a refusal the retry list must never re-send', 'refusal-model-free', {}, 'error', CODE.client, false, undefined, false],
 ]
 
 let failed = 0
@@ -186,6 +194,23 @@ const abortedNeverRetried = !policy.retryableCodes.includes(CODE.aborted)
   && !policy.retryableCodes.includes('CONFIG_DISABLED')
 console.log(`${abortedNeverRetried ? 'ok   ' : 'FAIL '} a cancelled turn is not in the retryable set: [${policy.retryableCodes}]`)
 
+// The round trip above reaches the failure classifier with an HTTP status, but
+// so does every plain non-2xx response in the request layer — the classifier is
+// where 4xx has to leave the retry vocabulary. 5xx and the capacity statuses
+// (408/425) stay SERVER: those are the gateway's own trouble and a re-send can
+// answer differently.
+const { classifyFailure } = await import('../src/http.js')
+const classify = (status, message, type) => classifyFailure(status, { error: { ...(type === undefined ? {} : { type }), message } }, () => {})
+const refused = classify(400, 'messages: an assistant message with no content precedes tool calls.', 'invalid_request_error')
+const clientOk = refused.code === 'CLIENT_ERROR' && !policy.retryableCodes.includes(refused.code)
+  && classify(404, 'No such model: no-such-model-free').code === 'CLIENT_ERROR'
+  && classify(422, 'unprocessable entity: messages[3].tool_calls is malformed').code === 'CLIENT_ERROR'
+  && classify(500, 'Internal server error').code === CODE.server
+  && classify(408, 'upstream timed out').code === CODE.server
+  && classify(425, 'upstream sent nothing').code === CODE.server
+  && policy.retryableCodes.includes(CODE.server)
+console.log(`${clientOk ? 'ok   ' : 'FAIL '} a 4xx is CLIENT_ERROR and never retried, 5xx/408/425 stay SERVER: ${JSON.stringify({ code: refused.code, retryable: policy.retryableCodes.includes(refused.code) })}`)
+
 // The same rule covers the usage event the harness appends after a turn, and the
 // OpenAI `usage` object has no required details block: reading `cached_tokens`
 // off an absent one made `inputTokens` NaN on every call from a gateway that
@@ -206,8 +231,8 @@ console.log(`${cachedOk ? 'ok   ' : 'FAIL '} a cache hit is taken out of the dis
 await new Promise(resolve => setTimeout(resolve, 900))
 await stub.close()
 
-const ok = failed === 0 && policyShapeOk && usageOk && cachedOk && abortedNeverRetried
+const ok = failed === 0 && policyShapeOk && usageOk && cachedOk && abortedNeverRetried && clientOk
 console.log(ok
   ? `\nretry-safety: all ${cases.length} failure shapes are classified, retried correctly, and durable-log safe`
-  : `\nretry-safety: ${failed + (policyShapeOk ? 0 : 1) + (usageOk ? 0 : 1) + (cachedOk ? 0 : 1) + (abortedNeverRetried ? 0 : 1)} failure(s)`)
+  : `\nretry-safety: ${failed + (policyShapeOk ? 0 : 1) + (usageOk ? 0 : 1) + (cachedOk ? 0 : 1) + (abortedNeverRetried ? 0 : 1) + (clientOk ? 0 : 1)} failure(s)`)
 process.exit(ok ? 0 : 1)

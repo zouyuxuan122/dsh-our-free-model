@@ -41,6 +41,7 @@ import { PluginUpdater, restoreBackup } from './src/updater.js'
 import { selfReload, watchPackage, isReloading } from './src/reload.js'
 import { createPushHub } from './src/push.js'
 import { rejectionFor, isLoopbackHost } from './src/trust.js'
+import { configureEgress, disposeEgress, egressStatus, redactProxy } from './src/proxy.js'
 import { resolveAttributionUserAgent } from './adapter/kernel.js'
 
 export const name = 'our-free-model'
@@ -697,7 +698,8 @@ export function apply(ctx, config) {
   }
   const api = createApiRoutes({
     settings, stats, availability, catalog: () => catalog, state,
-    refreshCatalog, refreshAvailability, syncForward, syncRelay,
+    refreshCatalog, refreshAvailability, syncForward, syncRelay, watchEgress,
+    probeEgress: () => detectEgress(),
     forwardInfo: () => ({
       running: forward !== null,
       port: forward?.port ?? 0,
@@ -858,6 +860,8 @@ export function apply(ctx, config) {
     void relay?.close().catch(() => {})
   }, 'our-free-model: forward listener')
 
+  ctx.effect(() => () => { disposeEgress() }, 'our-free-model: egress proxy')
+
   ctx.effect(() => () => { registration() }, 'our-free-model: adapter routes')
 
   ctx.effect(() => () => {
@@ -873,6 +877,12 @@ export function apply(ctx, config) {
   ctx.effect(() => {
     void (async () => {
       attributionUserAgent = await resolveAttributionUserAgent(logger)
+      // Before the first probe, not after: the probe learns which models this
+      // egress may use, and through a proxy that answer is a different one. A
+      // proxy that cannot be prepared is not fatal — the lane just goes direct,
+      // exactly as it did before this setting existed.
+      const exit = await configureEgress(settings.get().proxy)
+      if (exit.ok !== true) logger.warn?.(`our-free-model: egress proxy unusable (${redactProxy(String(exit.error ?? ''))})`)
       await refreshCatalog({ probe: true, force: true })
       await syncForward()
       await syncRelay()
@@ -1324,10 +1334,34 @@ function createApiRoutes(deps) {
           }
           next.forward = forward
         }
+        if (patch.proxy !== undefined) {
+          // `configureEgress` is the only thing that understands an exit address:
+          // it parses it, seals the password and installs the tunnel. A refusal is
+          // the user's typo, so it comes back as a 400 rather than a silent no-op.
+          // The password field is separate from the URL because the page never
+          // receives the stored one — an absent field keeps it, `clearPassword`
+          // drops it.
+          const proxy = { ...(current.proxy ?? {}), ...pick(patch.proxy, ['enabled', 'url', 'bypass', 'password', 'clearPassword']) }
+          const applied = await configureEgress(proxy)
+          if (applied.ok !== true) return send(400, { error: redactProxy(String(applied.error ?? 'proxy configuration rejected')) })
+          next.proxy = applied.record
+        }
         deps.settings.update(next)
         deps.settings.flush()
         await deps.syncForward()
         await deps.syncRelay()
+        if (patch.proxy !== undefined) {
+          // Two things are now stale, and neither can hold a settings save: the
+          // address the gateway sees, and every availability verdict taken from
+          // the old path. `watchEgress` is exactly that pair — it re-detects the
+          // exit through the new tunnel and re-probes when the answer moved — and
+          // it runs behind the response. The page's own `/reprobe` joins the same
+          // round rather than starting a second one; the 2-minute egress watch is
+          // the backstop for a change made anywhere else.
+          void deps.watchEgress().catch(error => {
+            deps.logger?.warn?.(`our-free-model: reprobe after a proxy change failed (${error?.message ?? error})`)
+          })
+        }
         if (patch.probeIntervalMinutes !== undefined || patch.feedPollMinutes !== undefined) {
           // Poll periods live in fiber effects; the next load picks a change up,
           // so surface that rather than pretending it hot-applied.
@@ -1342,6 +1376,13 @@ function createApiRoutes(deps) {
       if (method === 'POST' && routePath === '/reprobe') {
         await deps.refreshAvailability(true)
         return send(200, { ok: true, ...buildSummary(deps) })
+      }
+      if (method === 'POST' && routePath === '/proxy/test') {
+        // Deliberately not a full re-probe: this answers "does the exit work at
+        // all" in a couple of seconds, so the page can say "saved, but nothing
+        // answers through it" instead of hanging on a round that cannot succeed.
+        const seen = await deps.probeEgress()
+        return send(200, { ok: seen !== undefined, egress: seen ?? null })
       }
       if (method === 'GET' && routePath === '/forward/key') {
         return send(200, { key: deps.settings.get().forwardKey ?? '' })
@@ -1403,6 +1444,33 @@ async function readJson(req) {
   }
 }
 
+/**
+ * The proxy view the settings page renders.
+ *
+ * A password is never part of it in either direction: `hasPassword` says one is
+ * on file, the page shows dots, and an unchanged field means "keep it". The
+ * `active` half describes the tunnel that is actually installed, which is the
+ * honest answer when a hand-edited settings file disagrees with the running
+ * process — the page can then say "restart to apply" instead of lying.
+ */
+function publicProxy(settings) {
+  const status = egressStatus()
+  const stored = settings.proxy ?? {}
+  return {
+    enabled: stored.enabled === true,
+    url: typeof stored.url === 'string' ? stored.url : '',
+    bypass: typeof stored.bypass === 'string' ? stored.bypass : '',
+    hasPassword: status.hasPassword === true,
+    active: status.enabled === true,
+    scheme: status.scheme ?? '',
+    host: status.host ?? '',
+    port: status.port ?? 0,
+    secretScheme: status.secretScheme ?? '',
+    secretUnreadable: status.secretUnreadable === true,
+    backend: status.backend ?? '',
+  }
+}
+
 function publicSettings(settings, forwardInfo) {
   return {
     enabled: settings.enabled !== false,
@@ -1432,6 +1500,7 @@ function publicSettings(settings, forwardInfo) {
         addresses: forwardInfo.lan?.addresses ?? [],
       },
     },
+    proxy: publicProxy(settings),
   }
 }
 

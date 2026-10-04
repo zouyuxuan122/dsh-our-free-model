@@ -166,6 +166,11 @@ export const SETTINGS_INITIAL = {
      *  binds a routable address, and demands a key of its own (`forwardLanKey`). */
     lan: { enabled: false, port: 0 },
   },
+  /** Reach the gateway through a proxy, so a region-gated lane becomes usable
+   *  from wherever the proxy exits. `url` never carries a password: the settings
+   *  API strips it out and stores it sealed in `secret` instead (src/secret.js).
+   *  `bypass` is a comma/space separated list of hosts that still go direct. */
+  proxy: { enabled: false, url: '', bypass: 'localhost, 127.0.0.1, ::1', secret: null },
   /** Cap a turn's output so a slow lane cannot run away. */
   defaultMaxTokens: 32768,
   /** 所有模型默认允许一次纯推理检查点续写，false 可关闭。 */

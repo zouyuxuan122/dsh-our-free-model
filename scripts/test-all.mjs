@@ -28,6 +28,8 @@ const suites = [
   ['feed', 'feed-test.mjs', []],
   ['updater', 'updater-test.mjs', []],
   ['forward', 'forward-test.mjs', []],
+  ['proxy', 'proxy-test.mjs', []],
+  ['proxy-host', 'proxy-host-test.mjs', []],
   ['effort', 'effort-test.mjs', []],
   ['projection', 'projection-test.mjs', []],
   ['fingerprint', 'fingerprint-test.mjs', []],

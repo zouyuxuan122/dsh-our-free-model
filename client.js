@@ -136,6 +136,32 @@ window.__ModuleLoader__.load({
         'pref.maxTokens': '单次输出上限（token）',
         'pref.egress': '当前出口',
         'pref.probedAt': '最近探测',
+        'section.proxy': '代理出口',
+        'section.proxyHint': '让上游请求从你指定的服务器出去，地区受限的模型就能直接用。',
+        'proxy.enabled': '通过代理访问上游',
+        'proxy.url': '代理地址',
+        'proxy.urlPlaceholder': 'http://127.0.0.1:7890 或 socks5://1.2.3.4:1080',
+        'proxy.password': '代理密码',
+        'proxy.passwordSaved': '••••••••（已保存，留空不变）',
+        'proxy.passwordNone': '未设置',
+        'proxy.clear': '清除密码',
+        'proxy.clearUndo': '取消清除',
+        'proxy.bypass': '直连例外',
+        'proxy.bypassPlaceholder': '逗号分隔，例如 .internal, 10.0.0.0',
+        'proxy.apply': '应用并重新探测',
+        'proxy.applying': '正在通过新出口探测…',
+        'proxy.on': '代理已生效',
+        'proxy.off': '未启用代理',
+        'proxy.egress': '当前出口',
+        'proxy.protect': '密码保护：{what}',
+        'proxy.dpapi': 'Windows DPAPI（当前用户）',
+        'proxy.aes': '本机指纹 AES-256-GCM',
+        'proxy.unreadable': '已保存的密码在这台机器上解不开（换过电脑或 Windows 账户？），请重新填写一次。',
+        'proxy.hint': '密码不回显、不进日志、不明文落盘，单独加密保存在本机设置文件里。改完出口后插件会自动重新探测，地区受限模型会按新出口重新归类。',
+        'proxy.applied': '出口已切换',
+        'proxy.appliedBody': '网关现在看到的地址是 {egress}，可用模型已按新出口重新归类。',
+        'proxy.unreachable': '代理已保存，但连不通',
+        'proxy.unreachableBody': '通过这个出口拿不到公网地址，模型列表暂时维持原样。请检查地址、端口和密码。',
         'bench.run': '测一次',
         'bench.running': '测量中…',
         'bench.result': '首帧 {ttft}ms · 输出 {tps} tok/s · 推理 {reasoning} tok',
@@ -324,6 +350,32 @@ window.__ModuleLoader__.load({
         'pref.maxTokens': 'Output ceiling per call (tokens)',
         'pref.egress': 'Current egress',
         'pref.probedAt': 'Last probe',
+        'section.proxy': 'Exit proxy',
+        'section.proxyHint': 'Send upstream requests out through a server you name, so region-limited models work from there.',
+        'proxy.enabled': 'Reach the gateway through a proxy',
+        'proxy.url': 'Proxy address',
+        'proxy.urlPlaceholder': 'http://127.0.0.1:7890 or socks5://1.2.3.4:1080',
+        'proxy.password': 'Proxy password',
+        'proxy.passwordSaved': '•••••••• (saved — leave blank to keep)',
+        'proxy.passwordNone': 'Not set',
+        'proxy.clear': 'Clear password',
+        'proxy.clearUndo': 'Keep it',
+        'proxy.bypass': 'Bypass list',
+        'proxy.bypassPlaceholder': 'Comma separated, e.g. .internal, 10.0.0.0',
+        'proxy.apply': 'Apply and re-probe',
+        'proxy.applying': 'Probing through the new exit…',
+        'proxy.on': 'Proxy in use',
+        'proxy.off': 'No proxy',
+        'proxy.egress': 'Current egress',
+        'proxy.protect': 'Password protection: {what}',
+        'proxy.dpapi': 'Windows DPAPI (current user)',
+        'proxy.aes': 'machine-bound AES-256-GCM',
+        'proxy.unreadable': 'The stored password cannot be decrypted on this machine (different computer or Windows account?). Please enter it again.',
+        'proxy.hint': 'The password is never echoed, never logged and never written in the clear; it is sealed separately in the local settings file. After a change the plugin re-probes by itself, and region-limited models are re-classified against the new exit.',
+        'proxy.applied': 'Exit switched',
+        'proxy.appliedBody': 'The gateway now sees {egress}, and availability has been re-classified against the new exit.',
+        'proxy.unreachable': 'Proxy saved, but unreachable',
+        'proxy.unreachableBody': 'No public address came back through this exit, so the model list is unchanged for now. Check the address, port and password.',
         'bench.run': 'Run once',
         'bench.running': 'Measuring…',
         'bench.result': 'first frame {ttft}ms · {tps} tok/s · {reasoning} reasoning tokens',
@@ -1307,6 +1359,68 @@ window.__ModuleLoader__.load({
 
     const field = (label, control) => h('label', { className: 'ofm_field' }, h('span', null, label), control)
 
+    // ── exit proxy ────────────────────────────────────────────────────────────
+    function ExitProxy(props) {
+      const { settings, summary, t, onApply, busy } = props
+      const stored = settings.proxy ?? {}
+      const [draft, setDraft] = useState(stored)
+      const [password, setPassword] = useState('')
+      const [clearing, setClearing] = useState(false)
+      // The stored password never travels back over the wire, so the field starts
+      // empty every time and an empty field means "keep what is on disk". Typing
+      // in it cancels a pending clear, because the two are the same answer to the
+      // same question and the last thing the user did is the one they meant.
+      // Reset on a new summary, like the preferences panel: a reload is the only
+      // thing that changes it, and it is also the only thing that means "saved".
+      useEffect(() => {
+        setDraft(stored); setPassword(''); setClearing(false)
+      }, [summary])
+      const egress = summary.egress
+      const live = stored.active === true
+      const dirty = (draft?.enabled === true) !== (stored.enabled === true)
+        || String(draft?.url ?? '') !== String(stored.url ?? '')
+        || String(draft?.bypass ?? '') !== String(stored.bypass ?? '')
+        || password !== '' || clearing
+      return h(Panel, null,
+        h('div', { className: 'ofm_row' },
+          h(Switch, { checked: draft?.enabled === true, label: t('proxy.enabled'), onChange: () => setDraft(c => ({ ...c, enabled: !(c?.enabled === true) })) }),
+          h('span', { className: 'ofm_pill' }, h('span', { className: `ofm_dot ${live ? 'ok' : ''}` }), live ? t('proxy.on') : t('proxy.off'))),
+        h('div', { className: 'ofm_row' },
+          field(t('proxy.url'), h('input', {
+            className: 'ofm_input', style: { flex: 1, minWidth: 260 }, placeholder: t('proxy.urlPlaceholder'),
+            value: draft?.url ?? '', onChange: e => setDraft(c => ({ ...c, url: e.target.value })),
+          }))),
+        h('div', { className: 'ofm_row' },
+          field(t('proxy.password'), h('input', {
+            className: 'ofm_input', type: 'password', style: { maxWidth: 240 },
+            placeholder: stored.hasPassword === true ? t('proxy.passwordSaved') : t('proxy.passwordNone'),
+            value: password, onChange: e => { setPassword(e.target.value); setClearing(false) },
+          })),
+          stored.hasPassword === true ? h(Button, { kind: 'ghost', onClick: () => { setClearing(v => !v); setPassword('') } }, clearing ? t('proxy.clearUndo') : t('proxy.clear')) : null,
+          h(Button, {
+            kind: 'primary', disabled: busy || !dirty,
+            onClick: () => onApply({
+              proxy: {
+                enabled: draft?.enabled === true,
+                url: String(draft?.url ?? ''),
+                bypass: String(draft?.bypass ?? ''),
+                ...password === '' ? {} : { password },
+                ...clearing ? { clearPassword: true } : {},
+              },
+            }),
+          }, busy ? t('proxy.applying') : t('proxy.apply'))),
+        h('div', { className: 'ofm_row' },
+          field(t('proxy.bypass'), h('input', {
+            className: 'ofm_input', style: { flex: 1, minWidth: 260 }, placeholder: t('proxy.bypassPlaceholder'),
+            value: draft?.bypass ?? '', onChange: e => setDraft(c => ({ ...c, bypass: e.target.value })),
+          }))),
+        h('div', { className: 'ofm_row', style: { gap: 8 } },
+          h('span', { className: 'ofm_pill' }, `${t('proxy.egress')}: ${egress?.ip ?? '—'}${egress?.country ? ` (${egress.country})` : ''}`),
+          h('span', { className: 'ofm_pill' }, t('proxy.protect').replace('{what}', stored.backend === 'windows-dpapi' ? t('proxy.dpapi') : t('proxy.aes')))),
+        stored.secretUnreadable === true ? h('div', { className: 'ofm_callout ofm_error' }, t('proxy.unreadable')) : null,
+        h('div', { className: 'ofm_note' }, t('proxy.hint')))
+    }
+
     // ── preferences ───────────────────────────────────────────────────────────
     function Preferences(props) {
       const { summary, t, onApply, busy } = props
@@ -1497,6 +1611,33 @@ window.__ModuleLoader__.load({
           showToast({ title: t('settings.failed'), body: String(error?.message ?? error), tone: 'warn' })
         } finally { setBusy(false) }
       }
+      // A proxy change is the one setting whose whole effect is invisible until
+      // the lane answers: the exit address moved, and until the page learns the
+      // new one it cannot honestly say whether the change worked. So this is not
+      // the shared `apply` — it saves, asks the server to name the address the
+      // gateway now sees, and only then re-probes. The reachability check is a
+      // couple of seconds; the re-probe behind it is the slow part.
+      const applyProxy = async patch => {
+        setBusy(true)
+        try {
+          await post('/settings', patch)
+          summary.reload()
+          const test = await post('/proxy/test', undefined, 30_000)
+          if (test.ok !== true) {
+            showToast({ title: t('proxy.unreachable'), body: t('proxy.unreachableBody'), tone: 'warn' })
+            return
+          }
+          await post('/reprobe', undefined, 600_000)
+          summary.reload()
+          const seen = test.egress
+          showToast({
+            title: t('proxy.applied'),
+            body: t('proxy.appliedBody').replace('{egress}', seen ? `${seen.ip}${seen.country ? ` (${seen.country})` : ''}` : '—'),
+          })
+        } catch (error) {
+          showToast({ title: t('settings.failed'), body: String(error?.message ?? error), tone: 'warn' })
+        } finally { setBusy(false) }
+      }
       const bench = async model => {
         setBenches(current => ({ ...current, [model.id]: { running: true } }))
         try {
@@ -1539,6 +1680,7 @@ window.__ModuleLoader__.load({
           stats.status === 'ready' && stats.data !== undefined ? h(Dashboard, { stats: stats.data, summary: data, t: tagged })
             : h('p', { className: 'ofm_note' }, t('loading'))),
         h(Section, { title: t('section.forward'), hint: t('section.forwardHint') }, h(Forward, { settings: data.settings, t: tagged, onApply: apply, busy })),
+        h(Section, { title: t('section.proxy'), hint: t('section.proxyHint') }, h(ExitProxy, { settings: data.settings, summary: data, t: tagged, onApply: applyProxy, busy })),
         h(Section, { title: t('section.prefs'), hint: t('section.prefsHint') }, h(Preferences, { summary: data, t: tagged, onApply: apply, busy })),
         h(Section, { title: t('section.upgrade'), hint: t('section.upgradeHint') }, h(UpgradePanel, { t: tagged, settings: data.settings, onApply: apply, busy })))
     }
